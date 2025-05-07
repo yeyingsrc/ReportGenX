@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+@Createtime: 2024-08-05 10:15
+@Updatetime: 2025-05-07 15:00
+@description: 从Excel文件中读取漏洞和备案
+"""
+
 import pandas as pd
 from datetime import datetime
 
@@ -6,12 +13,11 @@ class ExcelDataReader:
         self.vulnerabilities = {}
         self.Icp_infos = {}
 
-    '''
-    从Excel文件中读取漏洞信息
-    '''
-
-    # 从Excel文件中读取漏洞信息，并将其存储到字典中
     def read_vulnerabilities_from_excel(self, file_path):
+        '''
+        从Excel文件中读取漏洞信息，并将其存储到字典中
+        '''
+
         data = pd.read_excel(file_path)
         
         vulnerability_names = []  # 存储漏洞名称的列表
@@ -31,8 +37,10 @@ class ExcelDataReader:
         
         return vulnerability_names, self.vulnerabilities
     
-    # 根据漏洞名称从字典中获取漏洞描述和加固建议
     def get_vulnerability_info(self, name):
+        '''
+        根据漏洞名称从字典中获取漏洞描述和加固建议
+        '''
         name = name.lower()
         if name in self.vulnerabilities:
             description = self.vulnerabilities[name]['漏洞描述']
@@ -41,12 +49,10 @@ class ExcelDataReader:
         else:
             return None, None
 
-    '''
-    从Excel文件中读取ICP信息
-    '''
-	# 从Excel文件中读取ICP信息，并将其存储到字典中
     def read_Icp_from_excel(self, file_path):
-
+        '''
+        从Excel文件中读取ICP信息，并将其存储到字典中
+        '''
         data = pd.read_excel(file_path)
         self.Icp_infos = {}  # 存储单位名称和备案号的字典
         
@@ -77,8 +83,11 @@ class ExcelDataReader:
             self.Icp_infos[variables['domain'].lower()] = variables
         return self.Icp_infos
     
-    # 根据根域名从字典中获取单位名称和备案号
     def get_Icp_info(self, domain):
+        '''
+        根据根域名从字典中获取单位名称和备案号
+        '''
+
         domain_to_search = domain.lower()
         if domain_to_search in self.Icp_infos:
             unitName = self.Icp_infos[domain_to_search]['unitName']

@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+@Createtime: 2024-08-05 10:15
+@Updatetime: 2025-05-07 15:00
+@description: 导出报告及日志
+"""
+
 import os
 
 class ReportGenerator:
@@ -23,25 +30,21 @@ class ReportGenerator:
         
     def log_save(self, replacements):
 
-        # 获取项目根目录路径
-        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        
         # 创建日志目录
-        log_dir = os.path.join(root_dir, self.output_file)
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
+        if not os.path.exists(self.output_file):
+            os.makedirs(self.output_file)
 
         # 创建客户公司目录
-        customerCompanyName_dir = os.path.join(root_dir, f'{self.output_file}{replacements["#customerCompanyName#"]}')
+        customerCompanyName_dir = f'{self.output_file}{replacements["#customerCompanyName#"]}'
         if not os.path.exists(customerCompanyName_dir):
             os.makedirs(customerCompanyName_dir)
 
         # 构建报告文件路径
-        report_file_path_notime = f'{customerCompanyName_dir}/{replacements["#customerCompanyName#"]}{replacements["#websitename#"]}存在{replacements["#vulName#"]}漏洞隐患【{replacements["#hazardLevel#"]}】.docx'      
+        report_file_path_notime = f'{customerCompanyName_dir}/【{replacements["#region#"]}】【{replacements["#hazard_type#"]}】{replacements["#reportName#"]}【{replacements["#hazardLevel#"]}】.docx'      
         # 保存文档
         report_file_path = self.save_document(report_file_path_notime)
 
-        output_file = f'{replacements["#customerCompanyName#"]}\t{replacements["#target#"]}\t{replacements["#vulName#"]}\t{self.supplierName}\t{replacements["#reportTime#"]}'
+        output_file = f'{replacements["#customerCompanyName#"]}\t{replacements["#target#"]}\t{replacements["#vulName#"]}\t{self.supplierName}\t{replacements["#hazardLevel#"]}\t{replacements["#reportTime#"]}'
         output_file_path = f'{self.output_file}{replacements["#reportTime#"]}_output.txt'
         with open(output_file_path, 'a+') as f: f.write('\n'+output_file)
 

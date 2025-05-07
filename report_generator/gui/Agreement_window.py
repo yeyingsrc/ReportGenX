@@ -1,3 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+@Createtime: 2024-08-05 10:15
+@Updatetime: 2025-05-07 15:00
+@description: 用户须知窗体
+"""
+
 import os
 import sys
 import yaml
@@ -84,14 +91,11 @@ def is_first_run(agreed_dates_log):
     
     today = datetime.now().strftime('%Y-%m-%d')
     if not os.path.isfile(agreed_dates_log):
-        # 获取项目根目录路径
-        root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         # 获取日志目录
         directory_path = os.path.dirname(agreed_dates_log)
         # 创建日志目录
-        log_dir = os.path.join(root_dir, directory_path)
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
+        if not os.path.exists(directory_path):
+            os.makedirs(directory_path)
         return True
     else:
         with open(agreed_dates_log, "r") as file:
