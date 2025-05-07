@@ -151,7 +151,7 @@ pyinstaller.exe -F -i resources\icon\favicon.ico -w ReportGenX.py
 `output/report/2025.05.07_output.txt`
 
 ```
-北京百度网讯科技有限公司	baidu.com	SQL注入漏洞	张三	高危	2025.05.07
+漏洞报告	北京百度网讯科技有限公司	baidu.com	SQL注入漏洞	张三	高危	2025.05.07
 ```
 
 ## 漏洞复现多图文

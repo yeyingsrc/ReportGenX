@@ -44,7 +44,7 @@ class ReportGenerator:
         # 保存文档
         report_file_path = self.save_document(report_file_path_notime)
 
-        output_file = f'{replacements["#customerCompanyName#"]}\t{replacements["#target#"]}\t{replacements["#vulName#"]}\t{self.supplierName}\t{replacements["#hazardLevel#"]}\t{replacements["#reportTime#"]}'
+        output_file = f'{replacements["#hazard_type#"]}\t{replacements["#customerCompanyName#"]}\t{replacements["#target#"]}\t{replacements["#vulName#"]}\t{self.supplierName}\t{replacements["#hazardLevel#"]}\t{replacements["#reportTime#"]}'
         output_file_path = f'{self.output_file}{replacements["#reportTime#"]}_output.txt'
         with open(output_file_path, 'a+') as f: f.write('\n'+output_file)
 
