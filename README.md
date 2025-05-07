@@ -117,9 +117,12 @@ PATH=D:\python\3;D:\python\2;D:\python\3\Scripts;D:\python\2\Scripts;
 pyinstaller打包命令如下：
 
 ```
-pip3 install pyinstaller -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple some-package
+pip3 install Pillow pyinstaller -i https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple some-package
 pyinstaller.exe -F -i resources\icon\favicon.ico -w ReportGenX.py
 ```
+
+- --strip : 减小生成文件大小
+- --exclude-module : 排除不需要的模块
 
 ## 基础测试
 
