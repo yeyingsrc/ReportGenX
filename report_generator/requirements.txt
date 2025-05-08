@@ -4,4 +4,3 @@ tldextract
 openpyxl
 pandas
 PyQt6
-sqlite3
