@@ -4,6 +4,7 @@
 @Updatetime: 2025-05-07 15:00
 @description: 表格文本替换
 """
+
 class DocumentEditor:
     def __init__(self, doc):
         self.doc = doc

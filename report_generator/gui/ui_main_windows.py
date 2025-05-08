@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 """
 @Createtime: 2024-08-05 10:15
-@Updatetime: 2025-05-07 15:00
+@Updatetime: 2025-05-08 18:40
 @description: 程序主窗体
 """
 
 import re
+import os
 import socket
+import sqlite3
 import warnings
 import threading
 import tldextract
@@ -17,7 +19,7 @@ from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 from core.document_image_processor import DocumentImageProcessor
 from core.report_generator import ReportGenerator
-from core.excel_data_reader import ExcelDataReader
+from core.data_reader_db import DbDataReader
 from core.document_editor import DocumentEditor
 from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtCore import QMetaObject, Q_ARG, Qt
@@ -39,24 +41,24 @@ class MainWindow(QWidget):
         # 保存所有的漏洞复现描述部分
         self.vuln_sections = []
 
-        # 创建 ExcelDataReader 对象，并进行处理
-        self.excel_data_reader = ExcelDataReader()
-
-        # 从Excel文件中读取ICP信息
-        self.Icp_infos = self.excel_data_reader.read_Icp_from_excel(self.push_config["icp_info_file"])
-
         # 从配置文件中获取隐患类型列表
         self.hazard_type = self.push_config["hazard_type"]
+        
+        # 创建DbDataReader实例
+        self.db_reader = DbDataReader(self.push_config["vul_or_icp"])
+        
+        # 从SQLite数据库中读取ICP信息
+        self.Icp_infos = self.db_reader.read_Icp_from_db()
+ 
+        # 从SQLite数据库中读取漏洞信息
+        self.vulnerability_names, self.vulnerabilities = self.db_reader.read_vulnerabilities_from_db()
 
-        # 从Excel文件中读取漏洞信息
-        self.vulnerability_names, self.vulnerabilities = self.excel_data_reader.read_vulnerabilities_from_excel(self.push_config["vulnerabilities_file"])
-
-        # 设置窗口标题和图标     
+        # 设置窗口标题和图标
         self.setWindowTitle(f'风险隐患报告生成器 - {self.push_config["version"]}')
         self.setWindowIcon(QIcon(self.push_config["icon_path"]))
 
         # 设置窗口大小
-        self.setMinimumSize(650, 700)  # 设置最小尺寸而不是固定尺寸
+        self.setMinimumSize(655, 700)  # 设置最小尺寸而不是固定尺寸
         self.init_ui()  # 初始化UI界面
 
     def init_ui(self):
@@ -98,8 +100,11 @@ class MainWindow(QWidget):
         # 创建漏洞名称下拉框
         self.vulName_box = QComboBox(self)
         self.vulName_box.addItems(self.vulnerability_names)
+        self.vulName_box.setEditable(True)  # 设置为可编辑
         self.setup_combobox_style(self.vulName_box, 390)  # 减小宽度以适应搜索框
-        
+        # 添加漏洞名称的信号连接
+        self.vulName_box.currentTextChanged.connect(self.update_hazard_name)
+
         # 创建搜索框和布局
         self.vuln_search_layout = QHBoxLayout()
         self.vuln_search_box = QLineEdit(self)
@@ -109,13 +114,6 @@ class MainWindow(QWidget):
         self.vuln_search_layout.addWidget(self.vuln_search_box)
         # 连接搜索功能
         self.vuln_search_box.returnPressed.connect(self.search_vulnerability)
-
-        # 创建搜索按钮
-        # self.vuln_search_button = QPushButton("搜索", self)
-        # self.vuln_search_button.setFixedWidth(50)
-        # self.vuln_search_layout.addWidget(self.vuln_search_button)
-        # self.vuln_search_button.clicked.connect(self.search_vulnerability)
-
 
         # 创建单位类型下拉框
         self.unitType_box = QComboBox(self)
@@ -154,8 +152,8 @@ class MainWindow(QWidget):
         self.setup_formlayout()
         self.setup_main_layout()
 
-    '''设置下拉框样式'''
     def setup_combobox_style(self, combobox, width):
+        '''设置下拉框样式'''
         combobox.setFixedSize(width, 20)
         combobox.setView(QListView())   ##todo 下拉框样式
         combobox.setStyleSheet("QComboBox QAbstractItemView {font-size:14px;}"     # 下拉文字大小
@@ -182,7 +180,51 @@ class MainWindow(QWidget):
             # 如果没有匹配项，显示提示信息
             self.vulName_box.addItem("未找到匹配项")
 
+    def handle_custom_vulnerability(self):
+        """处理自定义漏洞信息"""
+        current_text = self.vulName_box.currentText()
+        
+        # 如果是手动输入的新漏洞名称
+        if current_text not in self.vulnerability_names:
+            # 获取当前漏洞相关信息
+            vuln_info = {
+                "漏洞名称": current_text,
+                "风险级别": self.hazardLevel_box.currentText(),
+                "漏洞描述": self.text_edits[11].text(),
+                "加固建议": self.text_edits[13].text()
+            }
+            
+            try:
+                conn = sqlite3.connect(self.push_config["vul_or_icp"])
+                cursor = conn.cursor()
+                
+                # 插入新的漏洞信息
+                cursor.execute("""
+                    INSERT INTO vulnerabilities_Sheet1 (漏洞名称, 风险级别, 漏洞描述, 加固建议)
+                    VALUES (?, ?, ?, ?)
+                """, (
+                    vuln_info["漏洞名称"],
+                    vuln_info["风险级别"],
+                    vuln_info["漏洞描述"],
+                    vuln_info["加固建议"]
+                ))
+                
+                conn.commit()
+                conn.close()
+                
+                # 更新漏洞名称列表和内存中的数据
+                self.vulnerability_names.append(current_text)
+                self.vulnerabilities[current_text] = vuln_info
+                
+                # 显示成功消息
+                QMessageBox.information(self, "成功", "新漏洞信息已成功保存到数据库")
+                
+            except Exception as e:
+                QMessageBox.warning(self, "错误", f"保存漏洞信息时出错：{str(e)}")
+                # print(f"错误详情：{str(e)}")
+ 
     def setup_formlayout(self):
+        """设置表单布局"""
         # 添加用于隐患编号的文本框到布局
         self.form_layout.addRow(QLabel(self.labels[0]), self.vulnerability_id_text_edit)
 
@@ -227,7 +269,7 @@ class MainWindow(QWidget):
         domain_layout.addWidget(self.text_edits[8])
         # 连接信号到处理函数
         self.text_edits[6].textChanged.connect(self.process_url_or_ip)  # 添加这行
-        self.text_edits[6].textChanged.connect(self.update_get_domain)
+        self.text_edits[6].textChanged.connect(self.update_icp_info)
         # 添加工信备案号到表单布局
         domain_layout.addWidget(QLabel(self.labels[15]))
         domain_layout.addWidget(self.text_edits[10])
@@ -235,9 +277,6 @@ class MainWindow(QWidget):
 
         # 添加单位名称到表单布局
         self.form_layout.addRow(QLabel(self.labels[11]), self.text_edits[3])
-
-        # 在init_ui方法中，为网站域名添加信号，根据域名自动从文件中提取备案信息
-        self.text_edits[8].textChanged.connect(self.update_icp_info)
 
         # 在init_ui方法中，为单位名称、网站名称和隐患类型添加信号，根据其中变化自动调整其他参数数据
         self.text_edits[3].textChanged.connect(self.update_hazard_name)
@@ -306,44 +345,32 @@ class MainWindow(QWidget):
         self.update_hazard_name()
         self.add_vulnerability_section()
 
-    '''把表单布局添加到主布局中'''
     def setup_main_layout(self):
-        
+        '''把表单布局添加到主布局中'''        
         # 创建一个垂直布局，用于管理其他小部件和布局
         v_layout = QVBoxLayout()
-
         # 创建一个滚动区域，用于容纳可能超出屏幕显示范围的内容
         v_scroll = QScrollArea()
-
         # 将表单布局添加到垂直布局中
         v_layout.addLayout(self.form_layout)
-
         # 创建一个QWidget作为滚动区域的子部件
         widget = QWidget()
-
         # 将垂直布局设置为widget的布局
         widget.setLayout(v_layout)
-
         # 将widget设置为滚动区域的子部件
         v_scroll.setWidget(widget)
-
         # 设置滚动区域可以自动调整大小以适应其内容
         v_scroll.setWidgetResizable(True)
-
         # 设置滚动区域的水平滚动条策略为按需显示
         v_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        
         # 设置滚动区域的最小宽度，而不是固定宽度
-        v_scroll.setMinimumWidth(620)
+        v_scroll.setMinimumWidth(630)
         # 创建主布局，用于管理整个窗口的内容
         main_layout = QVBoxLayout()
-
         # 将滚动区域添加到主布局中
         main_layout.addWidget(v_scroll)
-
         # 将主布局设置为QMainWindow的布局
         self.setLayout(main_layout)
-
         # 显示窗口
         self.show()
 
@@ -393,12 +420,6 @@ class MainWindow(QWidget):
         self.update_hazard_name()
         self.add_vulnerability_section()
     
-    '''提取隐患url的根域名'''
-    def update_get_domain(self):
-        url = self.text_edits[6].text().strip()
-        domain = tldextract.extract(url).registered_domain
-        self.text_edits[8].setText(domain)  # 设置网站域名
-
     def process_url_or_ip(self):
         """处理URL或IP地址输入"""
         # 如果已有定时器在运行，取消它
@@ -413,8 +434,13 @@ class MainWindow(QWidget):
         try:
             # 获取输入值并去除空格
             input_text = self.text_edits[6].text().strip()
+            
+            # 如果输入为空，清空相关字段
             if not input_text:
-                self._update_ip('')
+                self.text_edits[7].clear()  # 清空网站名称
+                self.text_edits[8].clear()  # 清空网站域名
+                self.text_edits[9].clear()  # 清空网站IP
+                self.text_edits[10].clear()  # 清空备案号
                 return
 
             # 如果输入的是不完整的URL，添加协议头以便解析
@@ -453,11 +479,6 @@ class MainWindow(QWidget):
         # PyQt6: 使用QMetaObject在主线程中更新UI
         QMetaObject.invokeMethod(self.text_edits[9], "setText", Qt.ConnectionType.QueuedConnection, Q_ARG(str, ip))
 
-    def _update_domain(self, domain):
-        """更新域名到界面"""
-		# PyQt6: 使用QMetaObject在主线程中更新UI
-        QMetaObject.invokeMethod(self.text_edits[8], "setText", Qt.ConnectionType.QueuedConnection, Q_ARG(str, domain))
-
     def closeEvent(self, event):
         """窗口关闭时的处理"""
         # 关闭线程池
@@ -468,18 +489,95 @@ class MainWindow(QWidget):
             self.url_timer.cancel()
         super().closeEvent(event)
 
-    '''根据域名自动识别ICP备案信息'''
     def update_icp_info(self):
-        domain = self.text_edits[8].text().strip()
+        """根据域名自动从文件中提取备案信息"""
+        # 获取原始URL（可能包含多级子域名）
+        original_url = self.text_edits[6].text().strip().lower()
+        
+        if not original_url:
+            return
+        # IP地址的正则表达式
+        ip_pattern = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+        
+        if re.match(ip_pattern, original_url):
+            self.text_edits[8].clear()  # 清空网站域名
+            self.text_edits[10].clear()  # 清空备案号
+            return
 
-        # 根据根域名获取单位名称和备案号
-        unit_name, service_licence = self.excel_data_reader.get_Icp_info(domain)
+        # 提取原始URL中的所有部分
+        extracted = tldextract.extract(original_url)
+        
+        # 获取根域名
+        root_domain = f"{extracted.domain}.{extracted.suffix}".lower()
+        
+        # 检查是否有子域名
+        if extracted.subdomain:
+            # 处理多级子域名情况
+            subdomains = extracted.subdomain.split('.')
+            
+            # 从最长的子域名开始尝试（完整子域名）
+            full_subdomain = f"{extracted.subdomain}.{extracted.domain}.{extracted.suffix}".lower()
+            
+            # 先尝试完整子域名
+            unit_name, service_licence = self.db_reader.get_icp_info(full_subdomain)
+            if unit_name and service_licence:
+                self.text_edits[3].setText(unit_name)  # 设置单位名称
+                self.text_edits[10].setText(service_licence)  # 设置备案号
+                self.text_edits[8].setText(full_subdomain)  # 设置域名为完整子域名
+                self.update_unit_type(full_subdomain)
+                return
+                
+            # 如果完整子域名没有备案信息，逐级尝试更短的子域名
+            # 例如: test.dev.example.com -> dev.example.com -> example.com
+            for i in range(1, len(subdomains)):
+                partial_subdomain = f"{'.'.join(subdomains[i:])}.{extracted.domain}.{extracted.suffix}".lower()
+                unit_name, service_licence = self.db_reader.get_icp_info(partial_subdomain)
+                if unit_name and service_licence:
+                    self.text_edits[3].setText(unit_name)  # 设置单位名称
+                    self.text_edits[10].setText(service_licence)  # 设置备案号
+                    self.text_edits[8].setText(partial_subdomain)  # 设置域名为部分子域名
+                    self.update_unit_type(partial_subdomain)
+                    return
+        
+        # 如果所有子域名都没有备案信息，则使用根域名的备案信息
+        unit_name, service_licence = self.db_reader.get_icp_info(root_domain)
+        if unit_name and service_licence:
+            self.text_edits[3].setText(unit_name)  # 设置单位名称
+            self.text_edits[10].setText(service_licence)  # 设置备案号
+            self.text_edits[8].setText(root_domain)  # 设置域名为根域名
+            self.update_unit_type(root_domain)
+        else:
+            # 如果没有找到任何备案信息，仍然设置域名为根域名
+            self.text_edits[8].setText(root_domain)
 
-        self.text_edits[3].setText(unit_name)
-        self.text_edits[10].setText(service_licence)
+    def update_unit_type(self, domain):
+        """根据ICP信息中的单位性质更新单位类型"""
+        try:
+            # 从数据库中获取natureName
+            if domain in self.Icp_infos:
+                nature_name = self.Icp_infos[domain].get('natureName', '')
+                if nature_name:
+                    # 获取所有可选的单位类型
+                    unit_types = [self.unitType_box.itemText(i) for i in range(self.unitType_box.count())]
+                    
+                    # 如果是企业，则选择民营企业
+                    if nature_name == '企业':
+                        target_type = '民营企业'
+                    else:
+                        # 否则查找完全匹配的类型
+                        target_type = next((ut for ut in unit_types if ut == nature_name), None)
+                    
+                    # 如果找到匹配的类型，则设置下拉框
+                    if target_type:
+                        index = self.unitType_box.findText(target_type)
+                        if index >= 0:
+                            self.unitType_box.setCurrentIndex(index)
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"更新单位类型时出错：{str(e)}")
+            # print(f"更新单位类型时出错：{str(e)}")
 
-    '''添加一个槽函数用于更新隐患名称的值'''
     def update_hazard_name(self):
+        """添加一个槽函数用于更新隐患名称的值"""
         unit_name = self.text_edits[3].text().strip()
         website_name = self.text_edits[7].text().strip()
         Vulnerability_Hazard = self.text_edits[12].text().strip()
@@ -498,7 +596,7 @@ class MainWindow(QWidget):
         self.text_edits[2].setText(hazard_name)  # 设置隐患名称
 
         # 根据漏洞名称获取漏洞描述和加固建议
-        description, solution = self.excel_data_reader.get_vulnerability_info(hazard_type)
+        description, solution = self.db_reader.get_vulnerability_info(hazard_type)
         
         # 检查并打印出哪些变量是 NaN, 也就是列表内存在空值, 如果为NaN将其替换为空字符串
         description = "" if pd.isna(description) else description
@@ -550,17 +648,32 @@ class MainWindow(QWidget):
         # 保存漏洞复现描述和图片路径
         self.vuln_sections.append((new_vuln_layout, new_vuln_edit, new_vuln_image_label))
 
-    '''监控剪贴板'''
     def get_screenshot_from_clipboard(self):
+        """从剪贴板获取截图"""
         clipboard = QApplication.clipboard()
         mime_data = clipboard.mimeData()
-        # 检查剪贴板数据是否为图片类型
+        
+        # 检查剪贴板中是否有图片数据
         if mime_data.hasImage():
-            # 获取 QImage 对象而不是原始数据
+            # 从剪贴板获取图片
             image = clipboard.image()
-            return image
+            if not image.isNull():
+                return image
+                
+        # 检查剪贴板中是否有文件路径
+        elif mime_data.hasUrls():
+            for url in mime_data.urls():
+                file_path = url.toLocalFile()
+                # 检查是否是图片文件
+                if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+                    # 从文件加载图片
+                    image = QPixmap(file_path)
+                    if not image.isNull():
+                        return image.toImage()
+
+        # 如果剪贴板中没有图片数据或文件路径，则提示用户
         else:
-            QMessageBox.warning(self, '错误', '剪贴板中没有图片！')
+            QMessageBox.warning(self, '错误', '剪贴板中没有图片数据或文件路径！')
             return None
     
     '''处理备案截图'''
@@ -656,3 +769,5 @@ class MainWindow(QWidget):
 
         # 显示一个消息框通知用户报告已生成
         QMessageBox.information(None, '报告生成', f'报告已生成: {report_file_path}')
+
+        self.handle_custom_vulnerability()

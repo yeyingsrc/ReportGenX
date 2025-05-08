@@ -10,14 +10,15 @@
 
 如果只关注报告而不关注格式，每个选项似乎都不错，各有千秋。遗憾的是，它们都无法完全匹配正在使用的模板。我曾考虑对其中一些项目进行二次开发，但对于我这个初学者来说，难度太大了。相比之下，`Coderrrr-400`师傅的项目对我来说比较简单直接，也更加可塑。虽然我不懂`PyQt`，但在`chatgpt`和`Google`的帮助下，二次开发的项目还是达到了预期效果。
 
-# 配置
+# 使用
+
+## 配置
 
 `config.yaml`
 
 ```
-report_Template: 'templates/report_template.docx'
-vulnerability_List: 'data/vulnerabilities.xlsx'
-ICP_List: 'data/icp_info.xlsx'
+template_path: 'resources/templates/report_template.docx'
+vul_or_icp: 'data/combined.db'
 supplierName: '张三'
 city: '北京'
 region: '海淀区'
@@ -25,8 +26,10 @@ region: '海淀区'
 
 `vulnerabilities.xlsx`
 
-- 必须包含`漏洞名称`、`漏洞描述`、`修复建议`这三个表头，除此之外的表头都未做识别
+- 必须包含`漏洞名称`、`风险级别`、`漏洞描述`、`修复建议`这三个表头，除此之外的表头都未做识别
 
+  可以使用[Vulnerability-description-and-fix](https://github.com/s1g0day/Vulnerability-description-and-fix)
+  
   ![image-20240710101437914](./images/README/image-20240710101437914.png)
   
 
@@ -38,11 +41,12 @@ region: '海淀区'
 
 - 数据来源
 
+  也可以使用 [ICP_Query_Batch](https://github.com/s1g0day/ICP_Query_Batch) 进行自动提取
+
   ![image-20240705171031275](images/README/image-20240705171031275.png)
+  
 
-  可以使用 [ICP_Query_Batch](https://github.com/s1g0day/ICP_Query_Batch) 进行自动提取
-
-# 启动
+## 启动
 
 该项目适用于 `python3.*` ，已验证:
 
@@ -128,13 +132,7 @@ pyinstaller.exe -F -i resources\icon\favicon.ico -w ReportGenX.py
 
 > 注: 图中所示为随便复制的测试数据，非实际漏洞
 
-![image-20250507151300973](./images/README/image-20250507151300973.png)
-
-### 20250507-新增漏洞搜索功能
-
-便于漏洞表格过多时，上下翻找漏洞比较麻烦的情况，输入关键词`回车`即可。
-
-![image-20250507151111584](./images/README/image-20250507151111584.png)
+![image-20250508164934059](./images/README/image-20250508164934059.png)
 
 ## 基础输出
 
@@ -180,19 +178,21 @@ pyinstaller.exe -F -i resources\icon\favicon.ico -w ReportGenX.py
 - 1、根据输入自动改变输出
   - 根据隐患级别自动改变预警级别
   
+  - 根据域名自动解析与变更网站IP、备案号、单位名称、单位类型
+  
   - 根据单位名称、网站名称自动改变隐患名称和问题描述默认值
   
   - 根据隐患类型自动改变隐患名称、问题描述及整改建议
   
+  - 根据自定义漏洞，自动保存漏洞信息到数据库文件
 - 2、根据隐患URL自动提取根域名
-
 - 3、针对漏洞复现添加单个或多个图文
-
-- 4、网站IP自动解析
 
 ---
 
-20240805-更新说明
+# 更新说明
+
+## 20240805-项目重构
 
 随着代码更新迭代不断，如今单文件已经达到近800行的规模。虽然不算太多，但是每次间隔一段时间后再来阅读，还是得花费不少时间去理解。在最新的更新中，我对项目进行了一些的调整和改进。通过模块化使得代码逻辑更加清晰，更加完善和易于阅读。这种改进不仅减少了二次开发和维护的难度，还提高了项目的可扩展性和稳定性。
 
@@ -203,6 +203,38 @@ pyinstaller.exe -F -i resources\icon\favicon.ico -w ReportGenX.py
 - 漏洞复现部分无法通过关键词来定位，单图文好实现，但多图文的话就无法准确定位了。所以这部分代码仍然保持着”如果代码有效，就不要修复它“的理论状态
 
 项目发布之初，已被师傅发布到公众号进行推荐，在此非常感谢各位师傅的信任和支持，但因为上面的原因我从未主动推荐过这个项目。现在正式将这个项目推荐给各位师傅，期望这个项目能给你带来惊喜和便利。
+
+## 20250507-漏洞搜索
+
+便于漏洞数据过多时，上下翻找漏洞比较麻烦的情况，输入关键词`回车`即可。
+
+![image-20250507151111584](./images/README/image-20250507151111584.png)
+
+## 20250508-漏洞自定义
+
+若漏洞不在数据库中，则需要关闭程序，并在xlsx中添加漏洞信息。操作起来比较麻烦，在`0.11.2`版本解决了这一问题
+
+- 1、当自定义漏洞名称时，需要书写相应的`漏洞描述`和`修复建议`。
+
+  说明: `漏洞危害`是追加到`漏洞描述`中的，所以可以统一写在`漏洞描述`中。
+
+- 2、如果是自定义漏洞，在生成报告的时候会将填写的`漏洞名称、隐患级别、漏洞描述、修复建议`自动更新到数据库文件`漏洞名称、风险、漏洞描述、加固建议`，以便以后再用。
+
+  说明：在自动更新的数据中不会添加漏洞分类和默认端口，以便表格多样化。缺失的数据，需要手动补充。
+
+![image-20250508165141876](./images/README/image-20250508165141876.png)
+
+
+
+在`0.11.2`版本中，ICP和漏洞文件已更换为`sqlite`, 若感觉直接操作db文件觉的麻烦，在data目录中也提供了`Excel与SQLite数据库`间相互转换工具`data\Excel_SQLite\xlsx_to_sqlite.py`, 使用教程可以阅读`data\Excel_SQLite\readme.md`。
+
+```
+python3 xlsx_to_sqlite.py --output combined.db
+```
+
+`combined.db`：一般为固定，如果修改，则需同步修改`config.yaml`文件
+
+
 
 # 贡献与支持
 
