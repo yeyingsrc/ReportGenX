@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @Createtime: 2024-08-05 10:15
-@Updatetime: 2025-05-08 18:40
+@Updatetime: 2025-05-09 18:50
 @description: 程序主窗体
 """
 
@@ -34,7 +34,9 @@ class MainWindow(QWidget):
         self.thread_pool = ThreadPoolExecutor(max_workers=1)
         # 添加定时器用于延迟处理
         self.url_timer = None
-
+        # IP地址的正则表达式
+        self.ip_pattern = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+        
         # 从 YAML 文件中获取默认值
         self.push_config = push_config
 
@@ -178,22 +180,23 @@ class MainWindow(QWidget):
             self.vulName_box.addItems(filtered_names)
         else:
             # 如果没有匹配项，显示提示信息
-            self.vulName_box.addItem("未找到匹配项")
+            self.vulName_box.addItem("")
 
     def handle_custom_vulnerability(self):
-        """处理自定义漏洞信息"""
-        current_text = self.vulName_box.currentText()
-        
+        """处理自定义漏洞信息，并更新到数据库"""
+        current_text = self.vulName_box.currentText().strip()
+        if current_text == "入侵痕迹" or current_text == "页面篡改":
+            # 如果当前文本为空，说明用户正在输入新的漏洞名称
+            return
+        # 获取当前漏洞相关信息
+        vuln_info = {
+            "漏洞名称": current_text,
+            "风险级别": self.hazardLevel_box.currentText(),
+            "漏洞描述": self.text_edits[11].text(),
+            "加固建议": self.text_edits[13].text()
+        }
         # 如果是手动输入的新漏洞名称
         if current_text not in self.vulnerability_names:
-            # 获取当前漏洞相关信息
-            vuln_info = {
-                "漏洞名称": current_text,
-                "风险级别": self.hazardLevel_box.currentText(),
-                "漏洞描述": self.text_edits[11].text(),
-                "加固建议": self.text_edits[13].text()
-            }
-            
             try:
                 conn = sqlite3.connect(self.push_config["vul_or_icp"])
                 cursor = conn.cursor()
@@ -281,7 +284,6 @@ class MainWindow(QWidget):
         # 在init_ui方法中，为单位名称、网站名称和隐患类型添加信号，根据其中变化自动调整其他参数数据
         self.text_edits[3].textChanged.connect(self.update_hazard_name)
         self.text_edits[7].textChanged.connect(self.update_hazard_name)
-        self.vulName_box.currentIndexChanged.connect(self.update_hazard_name)
         # 添加隐患类型下拉框的信号连接
         self.hazard_type_box.currentTextChanged.connect(self.update_hazard_name)
 
@@ -419,7 +421,7 @@ class MainWindow(QWidget):
         self.vulnerability_id_text_edit.setText(self.generate_vulnerability_id())
         self.update_hazard_name()
         self.add_vulnerability_section()
-    
+
     def process_url_or_ip(self):
         """处理URL或IP地址输入"""
         # 如果已有定时器在运行，取消它
@@ -450,13 +452,10 @@ class MainWindow(QWidget):
             # 解析URL
             parsed = urlparse(input_text)
             
-            # IP地址的正则表达式
-            ip_pattern = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
-            
             # 获取主机名（去除端口）
             hostname = parsed.netloc.split(':')[0]
             
-            if re.match(ip_pattern, hostname):
+            if re.match(self.ip_pattern, hostname):
                 # 如果是IP地址，直接更新
                 self._update_ip(hostname)
             else:
@@ -489,67 +488,60 @@ class MainWindow(QWidget):
             self.url_timer.cancel()
         super().closeEvent(event)
 
-    def update_icp_info(self):
-        """根据域名自动从文件中提取备案信息"""
-        # 获取原始URL（可能包含多级子域名）
-        original_url = self.text_edits[6].text().strip().lower()
-        
-        if not original_url:
-            return
-        # IP地址的正则表达式
-        ip_pattern = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
-        
-        if re.match(ip_pattern, original_url):
-            self.text_edits[8].clear()  # 清空网站域名
-            self.text_edits[10].clear()  # 清空备案号
-            return
-
-        # 提取原始URL中的所有部分
-        extracted = tldextract.extract(original_url)
-        
-        # 获取根域名
-        root_domain = f"{extracted.domain}.{extracted.suffix}".lower()
-        
-        # 检查是否有子域名
-        if extracted.subdomain:
-            # 处理多级子域名情况
-            subdomains = extracted.subdomain.split('.')
-            
-            # 从最长的子域名开始尝试（完整子域名）
-            full_subdomain = f"{extracted.subdomain}.{extracted.domain}.{extracted.suffix}".lower()
-            
-            # 先尝试完整子域名
-            unit_name, service_licence = self.db_reader.get_icp_info(full_subdomain)
-            if unit_name and service_licence:
-                self.text_edits[3].setText(unit_name)  # 设置单位名称
-                self.text_edits[10].setText(service_licence)  # 设置备案号
-                self.text_edits[8].setText(full_subdomain)  # 设置域名为完整子域名
-                self.update_unit_type(full_subdomain)
-                return
-                
-            # 如果完整子域名没有备案信息，逐级尝试更短的子域名
-            # 例如: test.dev.example.com -> dev.example.com -> example.com
-            for i in range(1, len(subdomains)):
-                partial_subdomain = f"{'.'.join(subdomains[i:])}.{extracted.domain}.{extracted.suffix}".lower()
-                unit_name, service_licence = self.db_reader.get_icp_info(partial_subdomain)
-                if unit_name and service_licence:
-                    self.text_edits[3].setText(unit_name)  # 设置单位名称
-                    self.text_edits[10].setText(service_licence)  # 设置备案号
-                    self.text_edits[8].setText(partial_subdomain)  # 设置域名为部分子域名
-                    self.update_unit_type(partial_subdomain)
-                    return
-        
-        # 如果所有子域名都没有备案信息，则使用根域名的备案信息
-        unit_name, service_licence = self.db_reader.get_icp_info(root_domain)
+    def update_icp_info_with_domain(self, domain):
+        """更新与域名相关的ICP信息"""
+        unit_name, service_licence = self.db_reader.get_icp_info(domain)
         if unit_name and service_licence:
             self.text_edits[3].setText(unit_name)  # 设置单位名称
             self.text_edits[10].setText(service_licence)  # 设置备案号
-            self.text_edits[8].setText(root_domain)  # 设置域名为根域名
-            self.update_unit_type(root_domain)
-        else:
-            # 如果没有找到任何备案信息，仍然设置域名为根域名
+            self.text_edits[8].setText(domain)  # 设置域名
+            # self.update_unit_type(domain)
+            return domain
+        return False
+    def update_icp_info(self):
+        """根据域名自动更新ICP备案信息"""
+        try:
+            # 获取原始URL（可能包含多级子域名）
+            original_url = self.text_edits[6].text().strip().lower()
+            if not original_url:
+                return
+
+            # 如果输入的是IP地址，则跳过ICP查询
+            if re.match(self.ip_pattern, original_url):
+                self.text_edits[8].clear()  # 清空网站域名
+                self.text_edits[10].clear()  # 清空备案号
+                return
+
+            # 提取原始URL中的所有部分
+            extracted = tldextract.extract(original_url)
+
+            # 获取根域名
+            root_domain = extracted.registered_domain
+            # 默认设置域名为根域名
             self.text_edits[8].setText(root_domain)
 
+            # 检查是否有子域名
+            if root_domain and extracted.subdomain:
+                # 处理多级子域名情况
+                subdomains = extracted.subdomain.split('.')
+                # 拼接完整的域名
+                extracted_domain = f"{extracted.subdomain}.{extracted.domain}.{extracted.suffix}".lower()
+                # 尝试使用子域名的不同部分查询ICP备案信息
+                parts = extracted_domain.split('.')
+                for i in range(len(parts) - 2):
+                    partial_subdomain = '.'.join(parts[i:])
+                    if self.update_icp_info_with_domain(partial_subdomain):
+                        self.update_unit_type(partial_subdomain)
+                        return
+                
+            # 如果所有子域名都没有备案信息，则使用根域名的备案信息
+            if root_domain and self.update_icp_info_with_domain(root_domain):
+                self.update_unit_type(root_domain)
+                return
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"更新ICP信息时发生错误: {str(e)}")
+            # 发生错误时不影响用户体验，静默处理
+            # print(f"更新ICP信息时发生错误: {str(e)}")
     def update_unit_type(self, domain):
         """根据ICP信息中的单位性质更新单位类型"""
         try:
@@ -577,26 +569,29 @@ class MainWindow(QWidget):
             # print(f"更新单位类型时出错：{str(e)}")
 
     def update_hazard_name(self):
-        """添加一个槽函数用于更新隐患名称的值"""
+        """根据漏洞名称更新隐患名称、漏洞描述和修复建议"""
         unit_name = self.text_edits[3].text().strip()
         website_name = self.text_edits[7].text().strip()
         Vulnerability_Hazard = self.text_edits[12].text().strip()
-        hazard_type = self.vulName_box.currentText()
+        vul_Name = self.vulName_box.currentText()
 
+        '''构建隐患名称'''
         # 判断隐患类型
         selected_hazard_type = self.hazard_type_box.currentText()
         if selected_hazard_type == "漏洞报告":
-            hazard_name = f"{unit_name}{website_name}存在{hazard_type}漏洞隐患"
+            hazard_name = f"{unit_name}{website_name}存在{vul_Name}漏洞隐患"
             # 检查并修正重复的"漏洞漏洞隐患"
             if "漏洞漏洞隐患" in hazard_name:
                 hazard_name = hazard_name.replace("漏洞漏洞隐患", "漏洞隐患")
         else:
-            hazard_name = f"{unit_name}{website_name}存在{hazard_type}安全事件"
-        
+            hazard_name = f"{unit_name}{website_name}存在{selected_hazard_type}安全事件"
+            self.vulName_box.setCurrentText(selected_hazard_type)  # 设置漏洞名称
+            
         self.text_edits[2].setText(hazard_name)  # 设置隐患名称
-
+		
+        '''构建漏洞描述和加固建议'''
         # 根据漏洞名称获取漏洞描述和加固建议
-        description, solution = self.db_reader.get_vulnerability_info(hazard_type)
+        description, solution = self.db_reader.get_vulnerability_info(vul_Name)
         
         # 检查并打印出哪些变量是 NaN, 也就是列表内存在空值, 如果为NaN将其替换为空字符串
         description = "" if pd.isna(description) else description
@@ -611,6 +606,11 @@ class MainWindow(QWidget):
         self.text_edits[11].setText(description_text)  # 设置漏洞描述
         self.text_edits[13].setText(solution)  # 设置整改建议
 
+        if selected_hazard_type == "入侵痕迹" or selected_hazard_type == "页面篡改":
+            # 因为这两种类型的的漏洞描述无法固定，所以清空漏洞描述和漏洞危害
+            self.text_edits[11].clear()
+            self.text_edits[13].clear()
+            return
     '''更新预警级别'''
     def update_alert_level(self):
         hazard_level = self.hazardLevel_box.currentText()

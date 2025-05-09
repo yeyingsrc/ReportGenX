@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @Createtime: 2024-08-05 10:15
-@Updatetime: 2025-05-08 13:30
+Updatetime: 2025-05-09 15:51
 @description: 从SQLite数据库中读取漏洞和备案信息
 """
 
@@ -12,12 +12,8 @@ from datetime import datetime
 class DbDataReader:
     def __init__(self, db_path):
         self.db_path = db_path
-        self.vulnerabilities = {}
-        self.Icp_infos = {}
-        
-        # 初始化时加载数据
-        self.Icp_infos = self.read_Icp_from_db()
-        _, self.vulnerabilities = self.read_vulnerabilities_from_db()
+        self.input_path = input_path
+        self.output_path = output_path
 
     def read_Icp_from_db(self):
         """从SQLite数据库读取ICP信息"""
@@ -86,18 +82,24 @@ class DbDataReader:
 
     def get_vulnerability_info(self, name):
         """根据漏洞名称获取详细信息"""
+        # 确保每次查询漏洞信息都是最新的，便于实时更新
+        _, vulnerabilities = self.read_vulnerabilities_from_db()
+		
         name = name.lower()
-        if name in self.vulnerabilities:
-            description = self.vulnerabilities[name]['漏洞描述']
-            solution = self.vulnerabilities[name]['加固建议']
+        if name in vulnerabilities:
+            description = vulnerabilities[name]['漏洞描述']
+            solution = vulnerabilities[name]['加固建议']
             return description, solution
         return None, None
 
     def get_icp_info(self, domain):
         """根据域名获取ICP信息"""
+		# 确保每次查询ICP信息都是最新的，便于实时更新
+        Icp_infos = self.read_Icp_from_db()
+		
         domain_to_search = domain.lower()
-        if domain_to_search in self.Icp_infos:
-            unitName = self.Icp_infos[domain_to_search]['unitName']
-            serviceLicence = self.Icp_infos[domain_to_search]['serviceLicence']
+        if domain_to_search in Icp_infos:
+            unitName = Icp_infos[domain_to_search]['unitName']
+            serviceLicence = Icp_infos[domain_to_search]['serviceLicence']
             return unitName, serviceLicence
         return None, None

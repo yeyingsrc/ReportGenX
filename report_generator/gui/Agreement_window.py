@@ -101,7 +101,6 @@ def is_first_run(agreed_dates_log):
         with open(agreed_dates_log, "r") as file:
             agreed_dates = file.read().splitlines()
             return today not in agreed_dates
-
 def ReportGenX_main():
     push_config = yaml.safe_load(open("conf/config.yaml", "r", encoding="utf-8").read())
     app = QApplication([])
