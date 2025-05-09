@@ -12,8 +12,6 @@ from datetime import datetime
 class DbDataReader:
     def __init__(self, db_path):
         self.db_path = db_path
-        self.input_path = input_path
-        self.output_path = output_path
 
     def read_Icp_from_db(self):
         """从SQLite数据库读取ICP信息"""
