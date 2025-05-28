@@ -49,22 +49,31 @@ ReportGenX 是一个专门用于生成安全评估报告的自动化工具。适
 
 - 以服务端部署居多，有需要可以尝试一下
 
-| 项目名           | 项目地址                                   | 收录时间 | 最后更新(截至20250523) |
-| ---------------- | ------------------------------------------ | -------- | ---------------------- |
-| petereport-zh    | https://github.com/feishi-1/petereport-zh  | 20250125 | 20241010               |
-| petereport       | https://github.com/1modm/petereport        | 20250125 | 20240419               |
-| APTRS            | https://github.com/APTRS/APTRS             | 20240116 | 20250518               |
-| BlackStone       | https://github.com/micro-joan/BlackStone   | 20240116 | 20241022               |
-| Bug_writer       | https://github.com/yichensec/Bug_writer    | 20240116 | 已删库                 |
-| BugRepoter_0x727 | https://github.com/0x727/BugRepoter_0x727  | 20240116 | 20250208               |
-| ExportReport     | https://github.com/Potato-py/ExportReport  | 20240116 | 20240329               |
-| report           | https://github.com/CTF-MissFeng/report     | 20240116 | 20210630               |
-| Savior           | https://github.com/Mustard404/Savior       | 20240116 | 20220509               |
-| SecReport        | https://github.com/SecAegis/SecReport      | 20240116 | 20250502               |
-| sysreptor        | https://github.com/Syslifters/sysreptor    | 20240116 | 20250523               |
-| XhitReport       | https://github.com/Coderrrr-400/XhitReport | 20240116 | 20231114               |
+| 项目地址                                                     | 运行模式      | 编程语言 | 收录时间 | 最后更新(截至20250523) |
+| ------------------------------------------------------------ | ------------- | -------- | -------- | ---------------------- |
+| [PenTestReportGen](https://github.com/ifraise/PenTestReportGen) | 客户端-GUI    | Python   | 20250528 | 20250514               |
+| [petereport-zh](https://github.com/feishi-1/petereport-zh)   | 服务端        | Python   | 20250125 | 20241010               |
+| [petereport](https://github.com/1modm/petereport)            | 服务端        | Python   | 20250125 | 20240419               |
+| [APTRS](https://github.com/APTRS/APTRS)                      | 服务端        | Python   | 20240116 | 20250518               |
+| [BlackStone](https://github.com/micro-joan/BlackStone)       | 服务端        | PHP      | 20240116 | 20241022               |
+| [Bug_writer](https://github.com/yichensec/Bug_writer)        | 客户端-命令行 | Python   | 20240116 | 已删库                 |
+| [BugRepoter_0x727](https://github.com/0x727/BugRepoter_0x727) | 服务端        | PHP      | 20240116 | 20250208               |
+| [ExportReport](https://github.com/Potato-py/ExportReport)    | 服务端        | PHP      | 20240116 | 20240329               |
+| [report](https://github.com/CTF-MissFeng/report)             | 服务端        | Golang   | 20240116 | 20210630               |
+| [Savior](https://github.com/Mustard404/Savior)               | 服务端        | Python   | 20240116 | 20220509               |
+| [SecReport](https://github.com/SecAegis/SecReport)           | 服务端        | Python   | 20240116 | 20250502               |
+| [sysreptor](https://github.com/Syslifters/sysreptor)         | 服务端        | Python   | 20240116 | 20250523               |
+| [XhitReport](https://github.com/Coderrrr-400/XhitReport)     | 客户端-GUI    | Python   | 20240116 | 20231114               |
 
+> 注：项目基于关键词检索，可能收录不全
 
+关键词
+
+```
+渗透测试报告 生成
+漏洞报告 生成
+漏洞 报告
+```
 
 # 使用教程
 
