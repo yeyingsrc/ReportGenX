@@ -65,7 +65,7 @@ ReportGenX 是一个专门用于生成安全评估报告的自动化工具。适
 | [sysreptor](https://github.com/Syslifters/sysreptor)         | 服务端        | Python   | 20240116 | 20250523               |
 | [XhitReport](https://github.com/Coderrrr-400/XhitReport)     | 客户端-GUI    | Python   | 20240116 | 20231114               |
 
-> 注：项目基于关键词检索，可能收录不全
+> 注：项目基于关键词检索，可能收录不全，欢迎补充
 
 关键词
 
