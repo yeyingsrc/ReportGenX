@@ -546,6 +546,7 @@ class MainWindow(QWidget):
             # 默认设置域名为根域名
             self.text_edits[8].setText(root_domain)
             self.open_icp()
+            
             # 检查是否有子域名
             if root_domain and extracted.subdomain:
                 # 处理多级子域名情况

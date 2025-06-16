@@ -1,4 +1,4 @@
-version: 'V0.11.5'
+version: 'V0.12.0'
 icon_path: 'resources/icon/favicon.ico'
 template_path: 'resources/templates/report_template.docx'
 vul_or_icp: 'data/combined.db'

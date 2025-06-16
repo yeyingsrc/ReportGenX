@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @Createtime: 2024-08-05 10:15
-Updatetime: 2025-05-09 15:51
+@Updatetime: 2025-05-09 15:51
 @description: 从SQLite数据库中读取漏洞和备案信息
 """
 
