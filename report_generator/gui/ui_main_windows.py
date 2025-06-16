@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @Createtime: 2024-08-05 10:15
-@Updatetime: 2025-06-11 16:24
+@Updatetime: 2025-06-16 15:36
 @description: 程序主窗体
 """
 
@@ -12,6 +12,7 @@ import sqlite3
 import warnings
 import threading
 import tldextract
+import webbrowser
 import pandas as pd
 from docx import Document
 from datetime import datetime
@@ -506,6 +507,16 @@ class MainWindow(QWidget):
             # self.update_unit_type(domain)
             return domain
         return False
+
+    def open_icp(self):
+        '''
+        打开工信部备案网站
+        '''
+        # 工信部查询备案
+        mi_url = f"https://beian.miit.gov.cn/"
+        # 打开URL
+        webbrowser.open(mi_url)
+
     def update_icp_info(self):
         """根据域名自动更新ICP备案信息"""
         try:
@@ -527,7 +538,7 @@ class MainWindow(QWidget):
             root_domain = extracted.registered_domain
             # 默认设置域名为根域名
             self.text_edits[8].setText(root_domain)
-
+            self.open_icp()
             # 检查是否有子域名
             if root_domain and extracted.subdomain:
                 # 处理多级子域名情况
