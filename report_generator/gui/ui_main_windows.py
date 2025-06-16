@@ -510,12 +510,19 @@ class MainWindow(QWidget):
 
     def open_icp(self):
         '''
-        打开工信部备案网站
+        打开工信部备案网站，先弹出确认对话框
         '''
-        # 工信部查询备案
-        mi_url = f"https://beian.miit.gov.cn/"
-        # 打开URL
-        webbrowser.open(mi_url)
+        # 弹出确认对话框
+        reply = QMessageBox.question(self, '确认', '是否打开工信部备案网站？',
+                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                    QMessageBox.StandardButton.No)
+        
+        # 如果用户点击"是"，则打开网站
+        if reply == QMessageBox.StandardButton.Yes:
+            # 工信部查询备案
+            mi_url = f"https://beian.miit.gov.cn/"
+            # 打开URL
+            webbrowser.open(mi_url)
 
     def update_icp_info(self):
         """根据域名自动更新ICP备案信息"""
