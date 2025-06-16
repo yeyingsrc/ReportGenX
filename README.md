@@ -49,8 +49,9 @@ ReportGenX 是一个专门用于生成安全评估报告的自动化工具。适
 
 - 以服务端部署居多，有需要可以尝试一下
 
-| 项目地址                                                     | 运行模式      | 编程语言 | 收录时间 | 最后更新(截至20250523) |
+| 项目地址                                                     | 运行模式      | 编程语言 | 收录时间 | 最后更新(截至20250616) |
 | ------------------------------------------------------------ | ------------- | -------- | -------- | ---------------------- |
+| [report-generator-next](https://github.com/shuaihaoV/report-generator-next) | 客户端-GUI    | Rust   | 20250616 | 20250616               |
 | [PenTestReportGen](https://github.com/ifraise/PenTestReportGen) | 客户端-GUI    | Python   | 20250528 | 20250514               |
 | [petereport-zh](https://github.com/feishi-1/petereport-zh)   | 服务端        | Python   | 20250125 | 20241010               |
 | [petereport](https://github.com/1modm/petereport)            | 服务端        | Python   | 20250125 | 20240419               |
