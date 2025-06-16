@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @Createtime: 2024-08-05 10:15
-@Updatetime: 2025-05-09 18:50
+@Updatetime: 2025-06-11 16:24
 @description: 程序主窗体
 """
 
@@ -23,7 +23,7 @@ from core.data_reader_db import DbDataReader
 from core.document_editor import DocumentEditor
 from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtCore import QMetaObject, Q_ARG, Qt
-from PyQt6.QtWidgets import QApplication, QListView, QWidget, QLabel, QLineEdit, QComboBox, QPushButton, QVBoxLayout, QHBoxLayout, QFormLayout, QMessageBox, QScrollArea
+from PyQt6.QtWidgets import QApplication, QListView, QWidget, QLabel, QLineEdit, QComboBox, QPushButton, QVBoxLayout, QHBoxLayout, QFormLayout, QMessageBox, QScrollArea, QCheckBox
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 class MainWindow(QWidget):
@@ -197,6 +197,8 @@ class MainWindow(QWidget):
         }
         # 如果是手动输入的新漏洞名称
         if current_text not in self.vulnerability_names:
+            if not self.update_vul_checkbox.isChecked():
+                return  # 如果未勾选，则不更新漏洞库
             try:
                 conn = sqlite3.connect(self.push_config["vul_or_icp"])
                 cursor = conn.cursor()
@@ -246,8 +248,9 @@ class MainWindow(QWidget):
 
         # 添加漏洞名称下拉框和搜索框
         self.form_layout.addRow(QLabel(self.labels[4]), self.vuln_search_layout)
+        
         # 添加隐患URL到表单布局
-        # 创建一个水平布局来放置URL输入框和注释
+        # 创建一个水平布局来放置隐患URL输入框和注释
         url_layout = QHBoxLayout()
         url_layout.addWidget(self.text_edits[6])
         # 添加注释标签
@@ -323,6 +326,11 @@ class MainWindow(QWidget):
 
         # 添加备注到表单布局
         self.form_layout.addRow(QLabel(self.labels[-1]), self.text_edits[15])
+        
+        # 是否更新漏洞库
+        self.update_vul_checkbox = QCheckBox("漏洞库中无此漏洞时自动更新", self)
+        self.update_vul_checkbox.setChecked(True)  # 默认勾选
+        self.form_layout.addRow(self.update_vul_checkbox)
 
         # 创建按钮布局用于放置生成报告
         button_layout = QHBoxLayout()
@@ -444,7 +452,7 @@ class MainWindow(QWidget):
                 self.text_edits[9].clear()  # 清空网站IP
                 self.text_edits[10].clear()  # 清空备案号
                 return
-
+            
             # 如果输入的是不完整的URL，添加协议头以便解析
             if not input_text.startswith(('http://', 'https://')):
                 input_text = 'http://' + input_text
@@ -771,3 +779,7 @@ class MainWindow(QWidget):
         QMessageBox.information(None, '报告生成', f'报告已生成: {report_file_path}')
 
         self.handle_custom_vulnerability()
+        
+        # 自动变更隐患编号
+        self.vulnerability_id_text_edit.setText(self.generate_vulnerability_id())
+        

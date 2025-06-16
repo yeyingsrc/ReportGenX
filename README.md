@@ -113,6 +113,12 @@ region: '海淀区'
 
 ## 启动
 
+兼容环境
+
+- windows
+- mac(GUI布局存在异常，暂无设备用于调试)
+- linux(kali运行无异常)
+
 该项目适用于 `python3.*` ，已验证:
 
 - 开发：3.11.4
@@ -207,6 +213,19 @@ pyinstaller.exe -F -i resources\icon\favicon.ico -w ReportGenX.py
 
 ![image-20240710101059490](./images/README/image-20240710101059490.png)
 
+合并多个漏洞文件到单文件
+
+```
+# 默认输入输出目录为 output\report
+python3 merge_docx.py
+
+# 指定输入目录, 输出默认仍为output\report
+python3 merge_docx.py -d "指定的目录路径"
+
+# 指定输入输出
+python merge_docx.py -d "指定的目录路径" -o "指定的输出文件路径"
+```
+
 ### output.txt
 
 因为需求差异性，我这里我保留了最低数据。如有其他需求，可以自行修改`core/report_generator.py`文件
@@ -234,7 +253,7 @@ pyinstaller.exe -F -i resources\icon\favicon.ico -w ReportGenX.py
 一键清除: 仅删除所有漏洞附件及描述
 ```
 
-# 二开
+## 二开
 
 本项目只适用于当前模板，如果有需要可以对其再次二开，相应功能都已在代码中做注释。
 
