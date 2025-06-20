@@ -280,3 +280,10 @@ python merge_docx.py -d "指定的目录路径" -o "指定的输出文件路径"
 如果本项目对你有用，还请star鼓励一下。
 
 无论是添加新功能、改进代码、修复BUG或提供文档。请通过GitHub的Issue和Pull Request提交您的贡献，我会尽快给予帮助及更新。
+
+
+# 开源协议
+
+本项目采用 [MIT 开源协议](./LICENSE)。
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
