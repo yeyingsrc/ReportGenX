@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @Createtime: 2024-08-05 10:15
-@Updatetime: 2025-06-16 15:36
+@Updatetime: 2025-07-01 10:53
 @description: 程序主窗体
 """
 
@@ -9,8 +9,8 @@ import re
 import os
 import socket
 import sqlite3
+import platform
 import warnings
-import threading
 import tldextract
 import webbrowser
 import pandas as pd
@@ -22,21 +22,37 @@ from core.document_image_processor import DocumentImageProcessor
 from core.report_generator import ReportGenerator
 from core.data_reader_db import DbDataReader
 from core.document_editor import DocumentEditor
+from core.document_merger import DocumentMerger
 from PyQt6.QtGui import QIcon, QPixmap
-from PyQt6.QtCore import QMetaObject, Q_ARG, Qt
-from PyQt6.QtWidgets import QApplication, QListView, QWidget, QLabel, QLineEdit, QComboBox, QPushButton, QVBoxLayout, QHBoxLayout, QFormLayout, QMessageBox, QScrollArea, QCheckBox
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtWidgets import QApplication, QListView, QWidget, QLabel, QLineEdit, QComboBox, QPushButton, QVBoxLayout, QHBoxLayout, QFormLayout, QMessageBox, QScrollArea, QCheckBox, QFileDialog
+
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 class MainWindow(QWidget):
+    # 定义信号用于线程安全的GUI更新
+    ip_updated = pyqtSignal(str)
+    
     def __init__(self, push_config):
         super().__init__()
         
+        # 检测操作系统
+        self.is_macos = platform.system() == 'Darwin'
+        self.is_linux = platform.system() == 'Linux'
+        self.is_windows = platform.system() == 'Windows'
+        
         # 创建线程池
         self.thread_pool = ThreadPoolExecutor(max_workers=1)
-        # 添加定时器用于延迟处理
-        self.url_timer = None
+        # 使用QTimer替代threading.Timer以确保线程安全
+        self.url_timer = QTimer()
+        self.url_timer.setSingleShot(True)
+        self.url_timer.timeout.connect(self._process_url_or_ip_async)
+        
         # IP地址的正则表达式
         self.ip_pattern = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+        
+        # 连接信号到槽
+        self.ip_updated.connect(self._update_ip_ui)
         
         # 从 YAML 文件中获取默认值
         self.push_config = push_config
@@ -46,6 +62,9 @@ class MainWindow(QWidget):
 
         # 从配置文件中获取隐患类型列表
         self.hazard_type = self.push_config["hazard_type"]
+        
+        # 创建文档合并器实例
+        self.document_merger = DocumentMerger()
         
         # 创建DbDataReader实例
         self.db_reader = DbDataReader(self.push_config["vul_or_icp"])
@@ -60,8 +79,13 @@ class MainWindow(QWidget):
         self.setWindowTitle(f'风险隐患报告生成器 - {self.push_config["version"]}')
         self.setWindowIcon(QIcon(self.push_config["icon_path"]))
 
-        # 设置窗口大小
-        self.setMinimumSize(655, 700)  # 设置最小尺寸而不是固定尺寸
+        # 设置窗口大小 - 针对不同平台调整
+        if self.is_macos:
+            self.setMinimumSize(700, 750)  # macOS需要更大的空间
+        elif self.is_linux:
+            self.setMinimumSize(680, 720)  # Linux中等大小
+        else:
+            self.setMinimumSize(655, 700)  # Windows默认大小
         self.init_ui()  # 初始化UI界面
 
     def init_ui(self):
@@ -143,12 +167,14 @@ class MainWindow(QWidget):
         # 添加按钮用于在界面上添加新的漏洞复现描述和漏洞证明图片的功能
         self.add_vuln_button = QPushButton('添加证明', self)
         self.generate_button = QPushButton('生成报告', self)
-        self.reset_button = QPushButton('一键重置', self)
-        self.clear_all_button = QPushButton('一键清除', self)
+        self.reset_button = QPushButton('重置所有信息', self)
+        self.clear_all_button = QPushButton('清除证明', self)
+        self.merge_button = QPushButton('合并报告', self)  # 新增合并报告按钮
         self.add_vuln_button.clicked.connect(self.add_vulnerability_section)
         self.generate_button.clicked.connect(self.generate_report)
         self.reset_button.clicked.connect(self.reset_all)
         self.clear_all_button.clicked.connect(self.clear_all_sections)
+        self.merge_button.clicked.connect(self.merge_reports)  # 连接合并功能
 
         '''设置 GUI 组件表单布局'''
         self.form_layout = QFormLayout()
@@ -157,11 +183,30 @@ class MainWindow(QWidget):
 
     def setup_combobox_style(self, combobox, width):
         '''设置下拉框样式'''
-        combobox.setFixedSize(width, 20)
+        # 针对不同平台调整高度
+        if self.is_macos:
+            height = 25  # macOS需要更高
+        elif self.is_linux:
+            height = 22  # Linux中等高度
+        else:
+            height = 20  # Windows默认高度
+            
+        combobox.setFixedSize(width, height)
         combobox.setView(QListView())   ##todo 下拉框样式
-        combobox.setStyleSheet("QComboBox QAbstractItemView {font-size:14px;}"     # 下拉文字大小
-                               "QComboBox QAbstractItemView::item {height:30px;padding-left:10px;}"  # 下拉文字宽高
-                               "QScrollBar:vertical {border:2px solid grey;width:20px;}")    # 下拉侧边栏宽高
+        
+        # 针对不同平台的样式调整
+        base_style = "QComboBox QAbstractItemView {font-size:14px;}"
+        if self.is_macos:
+            item_style = "QComboBox QAbstractItemView::item {height:32px;padding-left:12px;}"
+            scroll_style = "QScrollBar:vertical {border:2px solid grey;width:22px;}"
+        elif self.is_linux:
+            item_style = "QComboBox QAbstractItemView::item {height:30px;padding-left:10px;}"
+            scroll_style = "QScrollBar:vertical {border:2px solid grey;width:20px;}"
+        else:
+            item_style = "QComboBox QAbstractItemView::item {height:30px;padding-left:10px;}"
+            scroll_style = "QScrollBar:vertical {border:2px solid grey;width:20px;}"
+            
+        combobox.setStyleSheet(base_style + item_style + scroll_style)
 
     def search_vulnerability(self):
         """搜索漏洞名称"""
@@ -337,6 +382,7 @@ class MainWindow(QWidget):
         button_layout = QHBoxLayout()
         button_layout.addWidget(self.generate_button)
         button_layout.addWidget(self.reset_button)  # 一键重置
+        button_layout.addWidget(self.merge_button)  # 添加合并按钮
         self.form_layout.addRow(button_layout)
 
         # 添加新的漏洞复现描述和图片按钮
@@ -374,8 +420,13 @@ class MainWindow(QWidget):
         v_scroll.setWidgetResizable(True)
         # 设置滚动区域的水平滚动条策略为按需显示
         v_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        # 设置滚动区域的最小宽度，而不是固定宽度
-        v_scroll.setMinimumWidth(630)
+        # 根据平台设置滚动区域的最小宽度
+        if self.is_macos:
+            v_scroll.setMinimumWidth(680)  # macOS需要更宽
+        elif self.is_linux:
+            v_scroll.setMinimumWidth(650)  # Linux中等宽度
+        else:
+            v_scroll.setMinimumWidth(630)  # Windows默认宽度
         # 创建主布局，用于管理整个窗口的内容
         main_layout = QVBoxLayout()
         # 将滚动区域添加到主布局中
@@ -433,12 +484,11 @@ class MainWindow(QWidget):
 
     def process_url_or_ip(self):
         """处理URL或IP地址输入"""
-        # 如果已有定时器在运行，取消它
-        if self.url_timer is not None:
-            self.url_timer.cancel()
-        # 创建新的定时器，延迟500毫秒执行
-        self.url_timer = threading.Timer(0.5, self._process_url_or_ip_async)
-        self.url_timer.start()
+        # 停止之前的定时器
+        if self.url_timer.isActive():
+            self.url_timer.stop()
+        # 启动新的定时器，延迟500毫秒执行
+        self.url_timer.start(500)
 
     def _process_url_or_ip_async(self):
         """异步处理URL或IP"""
@@ -478,23 +528,29 @@ class MainWindow(QWidget):
         """在线程池中解析域名"""
         try:
             ip = socket.gethostbyname(hostname)
-            self._update_ip(ip)
+            # 使用信号安全地更新GUI
+            self.ip_updated.emit(ip)
         except socket.gaierror:
-            self._update_ip('')
+            # 使用信号安全地更新GUI
+            self.ip_updated.emit('')
+
+    def _update_ip_ui(self, ip):
+        """在主线程中更新IP地址到界面"""
+        self.text_edits[9].setText(ip)
 
     def _update_ip(self, ip):
-        """更新IP地址到界面"""
-        # PyQt6: 使用QMetaObject在主线程中更新UI
-        QMetaObject.invokeMethod(self.text_edits[9], "setText", Qt.ConnectionType.QueuedConnection, Q_ARG(str, ip))
+        """更新IP地址到界面 - 保持向后兼容"""
+        # 使用信号安全地更新GUI
+        self.ip_updated.emit(ip)
 
     def closeEvent(self, event):
         """窗口关闭时的处理"""
+        # 停止定时器
+        if hasattr(self, 'url_timer') and self.url_timer.isActive():
+            self.url_timer.stop()
         # 关闭线程池
         if hasattr(self, 'thread_pool'):
             self.thread_pool.shutdown(wait=False)
-        # 取消定时器
-        if self.url_timer:
-            self.url_timer.cancel()
         super().closeEvent(event)
 
     def update_icp_info_with_domain(self, domain):
@@ -676,31 +732,46 @@ class MainWindow(QWidget):
         self.vuln_sections.append((new_vuln_layout, new_vuln_edit, new_vuln_image_label))
 
     def get_screenshot_from_clipboard(self):
-        """从剪贴板获取截图"""
-        clipboard = QApplication.clipboard()
-        mime_data = clipboard.mimeData()
-        
-        # 检查剪贴板中是否有图片数据
-        if mime_data.hasImage():
-            # 从剪贴板获取图片
-            image = clipboard.image()
-            if not image.isNull():
-                return image
-                
-        # 检查剪贴板中是否有文件路径
-        elif mime_data.hasUrls():
-            for url in mime_data.urls():
-                file_path = url.toLocalFile()
-                # 检查是否是图片文件
-                if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
-                    # 从文件加载图片
-                    image = QPixmap(file_path)
+        """从剪贴板获取截图 - 跨平台兼容"""
+        try:
+            clipboard = QApplication.clipboard()
+            mime_data = clipboard.mimeData()
+            
+            # 检查剪贴板中是否有图片数据
+            if mime_data.hasImage():
+                # 从剪贴板获取图片
+                image = clipboard.image()
+                if not image.isNull():
+                    return image
+                    
+            # 检查剪贴板中是否有文件路径
+            elif mime_data.hasUrls():
+                for url in mime_data.urls():
+                    file_path = url.toLocalFile()
+                    # 使用os.path.normpath处理路径兼容性
+                    file_path = os.path.normpath(file_path)
+                    # 检查是否是图片文件
+                    if file_path.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+                        # 从文件加载图片
+                        image = QPixmap(file_path)
+                        if not image.isNull():
+                            return image.toImage()
+
+            # macOS特殊处理：尝试从剪贴板获取文本路径
+            elif self.is_macos and mime_data.hasText():
+                text = mime_data.text().strip()
+                if text and os.path.isfile(text) and text.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+                    image = QPixmap(text)
                     if not image.isNull():
                         return image.toImage()
 
-        # 如果剪贴板中没有图片数据或文件路径，则提示用户
-        else:
-            QMessageBox.warning(self, '错误', '剪贴板中没有图片数据或文件路径！')
+            # 如果剪贴板中没有图片数据或文件路径，则提示用户
+            else:
+                QMessageBox.warning(self, '错误', '剪贴板中没有图片数据或文件路径！')
+                return None
+                
+        except Exception as e:
+            QMessageBox.warning(self, '错误', f'读取剪贴板时出错：{str(e)}')
             return None
     
     '''处理备案截图'''
@@ -801,4 +872,102 @@ class MainWindow(QWidget):
         
         # 自动变更隐患编号
         self.vulnerability_id_text_edit.setText(self.generate_vulnerability_id())
-        
+
+    def merge_reports(self):
+        """合并多个报告文档"""
+        try:
+            # 打开文件选择对话框，允许选择多个docx文件
+            file_dialog = QFileDialog()
+            file_dialog.setFileMode(QFileDialog.FileMode.ExistingFiles)  # 允许选择多个文件
+            file_dialog.setNameFilter("Word文档 (*.docx)")
+            file_dialog.setWindowTitle("选择要合并的报告文档")
+            
+            # 设置默认目录为输出目录 - 改进的路径处理
+            self._set_file_dialog_directory(file_dialog)
+            
+            if file_dialog.exec() == QFileDialog.DialogCode.Accepted:
+                selected_files = file_dialog.selectedFiles()
+                
+                if len(selected_files) < 2:
+                    QMessageBox.warning(self, '警告', '请至少选择两个文档进行合并！')
+                    return
+                
+                # 验证文件有效性
+                valid_files, invalid_files = self.document_merger.validate_files(selected_files)
+                
+                if invalid_files:
+                    error_msg = "以下文件无效：\n" + "\n".join(invalid_files)
+                    if valid_files:
+                        error_msg += f"\n\n是否继续使用 {len(valid_files)} 个有效文件进行合并？"
+                        reply = QMessageBox.question(self, '文件验证', error_msg,
+                                                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                                    QMessageBox.StandardButton.No)
+                        if reply != QMessageBox.StandardButton.Yes:
+                            return
+                        selected_files = valid_files
+                    else:
+                        QMessageBox.warning(self, '错误', error_msg)
+                        return
+                
+                if len(selected_files) < 2:
+                    QMessageBox.warning(self, '警告', '有效文件数量不足，至少需要两个文档进行合并！')
+                    return
+                
+                # 询问用户保存位置
+                save_dialog = QFileDialog()
+                save_dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+                save_dialog.setNameFilter("Word文档 (*.docx)")
+                save_dialog.setDefaultSuffix("docx")
+                
+                # 设置保存对话框的默认目录
+                self._set_file_dialog_directory(save_dialog)
+                
+                # 生成默认文件名
+                default_filename = self.document_merger.generate_default_filename()
+                save_dialog.selectFile(default_filename)
+                
+                if save_dialog.exec() == QFileDialog.DialogCode.Accepted:
+                    output_path = save_dialog.selectedFiles()[0]
+                    
+                    # 显示进度提示
+                    QMessageBox.information(self, '提示', '开始合并文档，请稍候...')
+                    
+                    # 调用合并功能
+                    success = self.document_merger.merge_docx_files(selected_files, output_path)
+                    
+                    if success:
+                        QMessageBox.information(self, '成功', f'文档合并完成！\n保存位置：{output_path}')
+                    else:
+                        QMessageBox.warning(self, '错误', '文档合并失败！请检查控制台输出获取详细信息。')
+                        
+        except Exception as e:
+            QMessageBox.critical(self, '错误', f'合并文档时发生错误：{str(e)}')
+
+    def _set_file_dialog_directory(self, dialog):
+        """设置文件对话框的默认目录"""
+        try:
+            # 获取当前工作目录
+            current_working_dir = os.getcwd()
+            
+            # 尝试多个可能的路径
+            possible_paths = [
+                os.path.join(current_working_dir, 'output', 'report'),
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'output', 'report'),
+                os.path.join(os.path.expanduser("~"), "Documents")
+            ]
+            
+            default_dir = None
+            for path in possible_paths:
+                abs_path = os.path.abspath(path)
+                if os.path.exists(abs_path) and os.path.isdir(abs_path):
+                    # 使用规范化的路径，避免特殊字符问题
+                    default_dir = os.path.normpath(abs_path)
+                    break
+            
+            if default_dir:
+                dialog.setDirectory(default_dir)
+                
+        except Exception as e:
+            # 路径设置失败时静默处理，使用系统默认
+            print(f"警告：设置默认目录失败: {e}")
+            pass
