@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @Createtime: 2024-08-05 10:15
-@Updatetime: 2025-07-01 10:00
+@Updatetime: 2025-05-07 15:00
 @description: 用户须知窗体
 """
 
@@ -9,7 +9,6 @@ import os
 import sys
 import yaml
 import warnings
-import platform
 from datetime import datetime
 from gui.ui_main_windows import MainWindow
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout, QMessageBox, QTextEdit, QCheckBox, QFrame, QSizePolicy
@@ -20,19 +19,8 @@ class DisclaimerWindow(QMainWindow):
         super().__init__()
         self.push_config = push_config
 
-        # 检测操作系统
-        self.is_macos = platform.system() == 'Darwin'
-        self.is_linux = platform.system() == 'Linux'
-        self.is_windows = platform.system() == 'Windows'
-
         self.setWindowTitle("用户须知")
-        # 根据平台调整窗口大小
-        if self.is_macos:
-            self.setFixedSize(520, 320)  # macOS需要更大空间
-        elif self.is_linux:
-            self.setFixedSize(510, 310)  # Linux中等大小
-        else:
-            self.setFixedSize(500, 300)  # Windows默认大小
+        self.setFixedSize(500, 300)  # 固定窗口大小
 
         self.create_widgets()
 
@@ -48,13 +36,7 @@ class DisclaimerWindow(QMainWindow):
         layout.addWidget(disclaimer_label)
 
         self.content_text = QTextEdit()
-        # 根据平台调整文本框大小
-        if self.is_macos:
-            self.content_text.setFixedSize(480, 160)  # macOS更大
-        elif self.is_linux:
-            self.content_text.setFixedSize(470, 155)  # Linux中等
-        else:
-            self.content_text.setFixedSize(460, 150)  # Windows默认
+        self.content_text.setFixedSize(460, 150)
         
         self.content_text.setReadOnly(True)
         self.content_text.insertPlainText(

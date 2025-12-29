@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 @Createtime: 2024-08-05 10:15
-@Updatetime: 2025-07-01 10:53
+@Updatetime: 2025-12-29 10:45
 @description: 程序主窗体
 """
 
@@ -9,7 +9,6 @@ import re
 import os
 import socket
 import sqlite3
-import platform
 import warnings
 import tldextract
 import webbrowser
@@ -35,11 +34,6 @@ class MainWindow(QWidget):
     
     def __init__(self, push_config):
         super().__init__()
-        
-        # 检测操作系统
-        self.is_macos = platform.system() == 'Darwin'
-        self.is_linux = platform.system() == 'Linux'
-        self.is_windows = platform.system() == 'Windows'
         
         # 创建线程池
         self.thread_pool = ThreadPoolExecutor(max_workers=1)
@@ -79,13 +73,9 @@ class MainWindow(QWidget):
         self.setWindowTitle(f'风险隐患报告生成器 - {self.push_config["version"]}')
         self.setWindowIcon(QIcon(self.push_config["icon_path"]))
 
-        # 设置窗口大小 - 针对不同平台调整
-        if self.is_macos:
-            self.setMinimumSize(700, 750)  # macOS需要更大的空间
-        elif self.is_linux:
-            self.setMinimumSize(680, 720)  # Linux中等大小
-        else:
-            self.setMinimumSize(655, 700)  # Windows默认大小
+        # 设置窗口大小
+        self.setMinimumSize(655, 700)  # 设置最小尺寸而不是固定尺寸
+
         self.init_ui()  # 初始化UI界面
 
     def init_ui(self):
@@ -183,29 +173,13 @@ class MainWindow(QWidget):
 
     def setup_combobox_style(self, combobox, width):
         '''设置下拉框样式'''
-        # 针对不同平台调整高度
-        if self.is_macos:
-            height = 25  # macOS需要更高
-        elif self.is_linux:
-            height = 22  # Linux中等高度
-        else:
-            height = 20  # Windows默认高度
-            
-        combobox.setFixedSize(width, height)
+        combobox.setFixedSize(width, 20)
         combobox.setView(QListView())   ##todo 下拉框样式
         
         # 针对不同平台的样式调整
         base_style = "QComboBox QAbstractItemView {font-size:14px;}"
-        if self.is_macos:
-            item_style = "QComboBox QAbstractItemView::item {height:32px;padding-left:12px;}"
-            scroll_style = "QScrollBar:vertical {border:2px solid grey;width:22px;}"
-        elif self.is_linux:
-            item_style = "QComboBox QAbstractItemView::item {height:30px;padding-left:10px;}"
-            scroll_style = "QScrollBar:vertical {border:2px solid grey;width:20px;}"
-        else:
-            item_style = "QComboBox QAbstractItemView::item {height:30px;padding-left:10px;}"
-            scroll_style = "QScrollBar:vertical {border:2px solid grey;width:20px;}"
-            
+        item_style = "QComboBox QAbstractItemView::item {height:30px;padding-left:10px;}"
+        scroll_style = "QScrollBar:vertical {border:2px solid grey;width:20px;}"
         combobox.setStyleSheet(base_style + item_style + scroll_style)
 
     def search_vulnerability(self):
@@ -420,13 +394,8 @@ class MainWindow(QWidget):
         v_scroll.setWidgetResizable(True)
         # 设置滚动区域的水平滚动条策略为按需显示
         v_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        # 根据平台设置滚动区域的最小宽度
-        if self.is_macos:
-            v_scroll.setMinimumWidth(680)  # macOS需要更宽
-        elif self.is_linux:
-            v_scroll.setMinimumWidth(650)  # Linux中等宽度
-        else:
-            v_scroll.setMinimumWidth(630)  # Windows默认宽度
+        # 设置滚动区域的最小宽度，而不是固定宽度
+        v_scroll.setMinimumWidth(630)
         # 创建主布局，用于管理整个窗口的内容
         main_layout = QVBoxLayout()
         # 将滚动区域添加到主布局中
@@ -469,18 +438,31 @@ class MainWindow(QWidget):
 
     '''仅清除漏洞复现数据'''
     def clear_all_sections(self):
-        for section in self.vuln_sections:
-            layout, edit, image_label = section
-            layout.deleteLater()
-            edit.deleteLater()
-            image_label.deleteLater()
-            self.form_layout.removeRow(layout)
-        self.vuln_sections.clear()
+        try:
+            # 复制列表进行遍历
+            sections_to_remove = self.vuln_sections[:]
+            
+            for section in sections_to_remove:
+                layout, edit, image_label = section
+                
+                # 清理布局内的控件
+                while layout.count():
+                    item = layout.takeAt(0)
+                    widget = item.widget()
+                    if widget is not None:
+                        widget.deleteLater()
+                
+                # 从表单布局移除
+                self.form_layout.removeRow(layout)
+                
+            self.vuln_sections.clear()
 
-        # 设置默认值
-        self.vulnerability_id_text_edit.setText(self.generate_vulnerability_id())
-        self.update_hazard_name()
-        self.add_vulnerability_section()
+            # 设置默认值
+            self.vulnerability_id_text_edit.setText(self.generate_vulnerability_id())
+            self.update_hazard_name()
+            self.add_vulnerability_section()
+        except Exception as e:
+            print(f"清除所有段落时出错: {e}")
 
     def process_url_or_ip(self):
         """处理URL或IP地址输入"""
@@ -539,7 +521,7 @@ class MainWindow(QWidget):
         self.text_edits[9].setText(ip)
 
     def _update_ip(self, ip):
-        """更新IP地址到界面 - 保持向后兼容"""
+        """更新IP地址到界面"""
         # 使用信号安全地更新GUI
         self.ip_updated.emit(ip)
 
@@ -732,7 +714,7 @@ class MainWindow(QWidget):
         self.vuln_sections.append((new_vuln_layout, new_vuln_edit, new_vuln_image_label))
 
     def get_screenshot_from_clipboard(self):
-        """从剪贴板获取截图 - 跨平台兼容"""
+        """从剪贴板获取截图"""
         try:
             clipboard = QApplication.clipboard()
             mime_data = clipboard.mimeData()
@@ -756,14 +738,6 @@ class MainWindow(QWidget):
                         image = QPixmap(file_path)
                         if not image.isNull():
                             return image.toImage()
-
-            # macOS特殊处理：尝试从剪贴板获取文本路径
-            elif self.is_macos and mime_data.hasText():
-                text = mime_data.text().strip()
-                if text and os.path.isfile(text) and text.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
-                    image = QPixmap(text)
-                    if not image.isNull():
-                        return image.toImage()
 
             # 如果剪贴板中没有图片数据或文件路径，则提示用户
             else:
@@ -804,12 +778,26 @@ class MainWindow(QWidget):
         
     '''删除该段'''
     def delete_vulnerability_section(self, layout, edit, label):
-        for i in reversed(range(layout.count())):
-            widget = layout.itemAt(i).widget()
-            if widget is not None:
-                widget.setParent(None)
-        self.form_layout.removeRow(layout)
-        self.vuln_sections.remove((layout, edit, label))
+        try:
+            # 检查是否存在于列表中，避免重复删除导致的崩溃
+            target = (layout, edit, label)
+            if target not in self.vuln_sections:
+                return
+
+            # 从列表中移除
+            self.vuln_sections.remove(target)
+
+            # 清理布局中的控件
+            while layout.count():
+                item = layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.deleteLater()
+            
+            # 从表单布局中移除行
+            self.form_layout.removeRow(layout)
+        except Exception as e:
+            print(f"删除段落时出错: {e}")
 
     '''生成报告'''
     def generate_report(self):

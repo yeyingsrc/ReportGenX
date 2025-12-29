@@ -1,6 +1,5 @@
 '''
 Author     : S1g0day
-Version    : 0.12.1
 Creat time : 2024/5/24 09:29
 Update time: 2025/6/11 16:30
 Introduce  : 便携式报告编写工具

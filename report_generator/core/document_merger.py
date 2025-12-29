@@ -227,7 +227,7 @@ class DocumentMerger:
                 print("没有ID映射，跳过引用更新")
                 return
                 
-            print(f"开始更新媒体引用，映射表: {id_mapping}")
+            # print(f"开始更新媒体引用，映射表: {id_mapping}")
             
             # 查找所有图片引用并更新
             updated_count = 0
@@ -238,7 +238,7 @@ class DocumentMerger:
                 if old_embed_id in id_mapping:
                     new_embed_id = id_mapping[old_embed_id]
                     blip.attrib['{{{0}}}embed'.format(nsmap['r'])] = new_embed_id
-                    print(f"更新blip引用: {old_embed_id} -> {new_embed_id}")
+                    # print(f"更新blip引用: {old_embed_id} -> {new_embed_id}")
                     updated_count += 1
             
             # 2. 更新其他可能的r:embed引用
@@ -249,7 +249,7 @@ class DocumentMerger:
                 if old_embed_id in id_mapping:
                     new_embed_id = id_mapping[old_embed_id]
                     elem.attrib['{{{0}}}embed'.format(nsmap['r'])] = new_embed_id
-                    print(f"更新其他媒体引用: {old_embed_id} -> {new_embed_id}")
+                    # print(f"更新其他媒体引用: {old_embed_id} -> {new_embed_id}")
                     updated_count += 1
             
             # 3. 更新v:imagedata元素的r:id属性（兼容旧版Word格式）
@@ -261,10 +261,10 @@ class DocumentMerger:
                 if old_id in id_mapping:
                     new_id = id_mapping[old_id]
                     imagedata.attrib['{{{0}}}id'.format(nsmap['r'])] = new_id
-                    print(f"更新VML图片引用: {old_id} -> {new_id}")
+                    # print(f"更新VML图片引用: {old_id} -> {new_id}")
                     updated_count += 1
             
-            print(f"总共更新了 {updated_count} 个媒体引用")
+            # print(f"总共更新了 {updated_count} 个媒体引用")
                         
         except Exception as e:
             print(f"更新文档媒体引用失败: {e}")
@@ -370,7 +370,7 @@ class DocumentMerger:
                         new_rel.attrib['Target'] = f'media/{new_file_name}'
                         
                         base_rels_root.append(new_rel)
-                        print(f"添加媒体关系: {old_id} -> {new_id}, {media_file} -> {new_file_name}")
+                        # print(f"添加媒体关系: {old_id} -> {new_id}, {media_file} -> {new_file_name}")
                         break
             
             # 8. 保存更新后的关系文件
@@ -436,7 +436,7 @@ class DocumentMerger:
             root = etree.Element("{%s}Relationships" % relationships_ns)
             tree = etree.ElementTree(root)
             tree.write(base_rels_path, encoding='UTF-8', xml_declaration=True, pretty_print=True)
-            print(f"创建基础关系文件: {base_rels_path}")
+            # print(f"创建基础关系文件: {base_rels_path}")
         except Exception as e:
             print(f"创建基础关系文件失败: {e}")
 
