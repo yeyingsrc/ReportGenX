@@ -1,0 +1,186 @@
+name: Release Build
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions: write-all
+
+jobs:
+  check_tag_version:
+    name: Check Version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          PACKAGE_VERSION=$(grep '"version":' package.json | head -1 | awk -F: '{ print $2 }' | sed 's/[", ]//g')
+          if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Error: Tag version ($TAG_VERSION) does not match package.json version ($PACKAGE_VERSION)"
+            exit 1
+          fi
+
+  build:
+    name: Build
+    needs: check_tag_version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows x64 & ARM64 (using x64 Python backend for both, relying on emulation for ARM64)
+          - os: windows-latest
+            platform: win
+            arch: x64
+            args: "--win --x64 --arm64"
+          
+          # macOS Intel
+          - os: macos-latest
+            platform: mac
+            arch: x64
+            args: "--mac --x64"
+            
+          # macOS Apple Silicon
+          - os: macos-latest
+            platform: mac
+            arch: arm64
+            args: "--mac --arm64"
+            
+          # Linux x64
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+            args: "--linux --x64"
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pyinstaller
+
+      - name: Build Python Backend
+        working-directory: ./backend
+        run: |
+          pyinstaller --noconfirm api.spec
+
+      - name: Ad-hoc sign backend executable (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          codesign --force --deep --sign - backend/dist/api/api
+          codesign --verify --verbose backend/dist/api/api || true
+
+      - name: Create output directory (Windows)
+        if: runner.os == 'Windows'
+        run: if (!(Test-Path "backend/output")) { New-Item -Path "backend/output" -ItemType Directory }
+        shell: pwsh
+
+      - name: Create output directory (Unix)
+        if: runner.os != 'Windows'
+        run: mkdir -p backend/output
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Node dependencies
+        run: npm install
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2 rpm
+
+      - name: Build Electron App
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist -- ${{ matrix.args }} --publish never
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-${{ matrix.arch }}-build
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            dist/latest*.yml
+          retention-days: 1
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate Release Notes
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/v$VERSION"
+          
+          cat > release.txt <<EOF
+          ## 下载地址
+          
+          ### Windows (不再支持Win7)
+          #### 正常版本(推荐)
+          - [64位(常用)]($DOWNLOAD_URL/ReportGenX-Setup-$VERSION-x64.exe) | [ARM64(不常用)]($DOWNLOAD_URL/ReportGenX-Setup-$VERSION-arm64.exe)
+          
+          ### macOS
+          - [Apple M芯片]($DOWNLOAD_URL/ReportGenX-$VERSION-arm64.dmg) | [Intel芯片]($DOWNLOAD_URL/ReportGenX-$VERSION-x64.dmg)
+          
+          ### Linux
+          #### DEB包(Debian系) 使用 apt ./路径 安装
+          - [64位]($DOWNLOAD_URL/ReportGenX-$VERSION-amd64.deb)
+          
+          #### RPM包(Redhat系) 使用 dnf ./路径 安装
+          - [64位]($DOWNLOAD_URL/ReportGenX-$VERSION-x86_64.rpm)
+          
+          #### AppImage (通用)
+          - [64位]($DOWNLOAD_URL/ReportGenX-$VERSION-x86_64.AppImage)
+          
+          ### 校验和
+          - [latest.yml]($DOWNLOAD_URL/latest.yml)
+          - [latest-mac.yml]($DOWNLOAD_URL/latest-mac.yml)
+          - [latest-linux.yml]($DOWNLOAD_URL/latest-linux.yml)
+          EOF
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+            dist/latest*.yml
+          body_path: release.txt
+          append_body: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

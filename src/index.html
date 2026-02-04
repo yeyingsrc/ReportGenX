@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>ReportGenX</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>风险隐患报告生成器</h1>
+            <div id="status-bar">
+                <span style="margin-right: 5px; font-weight: 500; white-space: nowrap;">模板:</span>
+                <select id="template-selector" style="padding: 4px 8px; border-radius: 4px; border: 1px solid #ccc; margin-right: 5px;"></select>
+                <button id="btn-reload-templates" class="btn-mini" title="刷新模板列表">🔄</button>
+                <button id="btn-open-toolbox" class="btn-secondary" style="margin-left: 15px; white-space: nowrap;">🛠️ 工具箱</button>
+                <span class="status-indicator" id="api-status-dot" style="cursor: help;"></span>
+                <span id="api-status-text" style="cursor: help;">Connecting to Python Backend...</span>
+                <span id="version-info" style="margin-left: 15px; font-weight: bold;"></span>
+            </div>
+        </header>
+
+        <!-- 动态表单容器 (所有模板使用动态表单) -->
+        <div id="dynamic-form-container"></div>
+
+    </div>
+
+    <!-- 工具箱模态框 (统一入口) -->
+    <div id="toolbox-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>工具箱</h2>
+                <span class="close-toolbox">&times;</span>
+            </div>
+            
+            <div class="toolbox-container">
+                <!-- 左侧导航 -->
+                <div class="toolbox-sidebar">
+                    <div class="toolbox-nav-item active" data-target="view-merge">
+                        <span class="nav-icon">📄</span> 报告合并
+                    </div>
+                    <div class="toolbox-nav-item" data-target="view-vuln-lib">
+                        <span class="nav-icon">🛡️</span> 漏洞库管理
+                    </div>
+                    <div class="toolbox-nav-item" data-target="view-icp-cache">
+                        <span class="nav-icon">🌐</span> ICP 备案库
+                    </div>
+                    <div class="toolbox-nav-item" data-target="view-template">
+                        <span class="nav-icon">📋</span> 模板管理
+                    </div>
+                    <div class="toolbox-nav-item" data-target="view-settings">
+                        <span class="nav-icon">⚙️</span> 系统设置
+                    </div>
+                </div>
+
+                <!-- 右侧内容区 -->
+                <div class="toolbox-content">
+                    
+                    <!-- View 1: 报告合并 -->
+                    <div id="view-merge" class="toolbox-view active">
+                         <div class="tools-layout">
+                            <!-- 左侧：可用文件列表 -->
+                            <div class="tools-column source-column">
+                                <div class="column-header">
+                                    <div style="display:flex; align-items:center;">
+                                        <h4 class="column-title" style="margin-right: 15px;">待合并报告</h4>
+                                        <button id="btn-batch-delete" class="btn-icon-text" style="color:#d9534f; border-color:#d9534f; display:none;">🗑️ 批量删除</button>
+                                    </div>
+                                    <button id="btn-refresh-reports" class="btn-icon-text" title="刷新列表">🔄 刷新</button>
+                                </div>
+                                
+                                <div class="file-list-header">
+                                    <span class="col-check"><input type="checkbox" id="check-all-reports" title="全选"></span>
+                                    <span class="col-name">文件名</span>
+                                    <span class="col-date">修改时间</span>
+                                    <span class="col-dir">目录</span>
+                                    <span class="col-action">操作</span>
+                                </div>
+                                <div id="merge-source-list" class="file-list-container">
+                                </div>
+                            </div>
+
+                            <!-- 右侧：已选列表 & 操作 -->
+                            <div class="tools-column selected-column">
+                                <div class="column-header">
+                                     <h4 class="column-title">已选列表 (合并顺序)</h4>
+                                     <button id="btn-clear-selection" class="btn-icon-text" style="font-size:11px; padding:2px 8px;" title="清空已选">清空</button>
+                                </div>
+                                <div id="merge-selected-list" class="selected-list-container">
+                                    <div class="empty-state">
+                                        <div class="empty-icon">📂</div>
+                                        <p>请从左侧勾选要合并的文件</p>
+                                    </div>
+                                </div>
+                                
+                                <div class="merge-actions-panel">
+                                    <label class="input-label">合并后文件名</label>
+                                    <div class="input-group">
+                                        <input type="text" id="merge-filename" value="Merged_Report.docx" class="form-input">
+                                        <span class="input-suffix">.docx</span>
+                                    </div>
+                                    
+                                    <button id="btn-start-merge" class="btn btn-primary btn-block btn-lg">
+                                        <span class="icon">✨</span> 开始合并
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- View 2: 漏洞库管理 -->
+                    <div id="view-vuln-lib" class="toolbox-view">
+                         <div style="flex: 1; display: flex; overflow: hidden; padding: 0; gap: 20px;">
+                            <!-- 左侧列表 (固定宽度 450px，优化比例) -->
+                            <div class="manager-left" style="width: 450px; min-width: 450px; border: 1px solid var(--border-color); border-radius: 8px; display: flex; flex-direction: column; background: #fff; padding: 15px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 10px;">
+                                     <h4 class="column-title">漏洞列表</h4>
+                                     <span style="font-size:12px; color:#999;" id="vuln-count-badge"></span>
+                                </div>
+                                <div class="input-group" style="margin-bottom: 10px; border-radius: 4px; border: 1px solid var(--border-color);">
+                                     <span style="padding: 0 8px; color: #999; display: flex; align-items: center;">🔍</span>
+                                     <input type="text" id="vuln-manager-search" placeholder="搜索漏洞..." style="border: none; padding: 6px; font-size: 13px; width: 100%; outline: none;">
+                                </div>
+                                
+                                <div class="vuln-list-header" style="display: flex; background: #f8f9fa; padding: 8px 10px; font-weight: 600; font-size: 12px; color: var(--text-muted); border-bottom: 1px solid var(--border-color);">
+                                    <span style="flex: 2;">漏洞名称</span>
+                                    <span style="flex: 1; padding: 0 5px;">分类</span>
+                                    <span style="width: 50px; text-align: center;">级别</span>
+                                </div>
+                                <div class="vuln-list-container" id="vuln-manager-list" style="flex: 1; overflow-y: auto;">
+                                </div>
+                            </div>
+
+                            <!-- 右侧编辑 (自适应剩余空间) -->
+                            <div class="manager-right" style="flex: 1; border: 1px solid var(--border-color); border-radius: 8px; background: #fff; padding: 25px; overflow-y: auto; display: flex; flex-direction: column;">
+                                <h4 class="column-title" style="margin-bottom:15px;" id="vuln-form-title">漏洞详情编辑</h4>
+                                <div id="vuln-manager-form" style="display: flex; flex-direction: column; gap: 15px; flex: 1;">
+                                    <input type="hidden" id="manage-vuln-id">
+                                    
+                                    <div class="row" style="display: flex; gap: 15px;">
+                                        <div class="form-group" style="flex: 1;">
+                                            <label>漏洞分类</label>
+                                            <input type="text" id="manage-category" placeholder="例如：SQL注入">
+                                        </div>
+                                        <div class="form-group" style="flex: 1;">
+                                            <label>默认端口</label>
+                                            <input type="text" id="manage-port" placeholder="例如：80, 443">
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>漏洞名称</label>
+                                        <input type="text" id="manage-name" required placeholder="请输入漏洞名称">
+                                    </div>
+                                    
+                                    <div class="row" style="display: flex; gap: 15px;">
+                                         <div class="form-group" style="flex: 1;">
+                                            <label>风险级别</label>
+                                            <select id="manage-level">
+                                                <option value="高危">高危</option>
+                                                <option value="中危">中危</option>
+                                                <option value="低危">低危</option>
+                                                <option value="信息性">信息性</option>
+                                            </select>
+                                        </div>
+                                        <div class="form-group" style="flex: 2;">
+                                            <label>定级依据</label>
+                                            <input type="text" id="manage-basis" placeholder="例如：关键信息泄露">
+                                        </div>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>漏洞描述</label>
+                                        <textarea id="manage-desc" rows="3" required placeholder="详细描述漏洞原理..."></textarea>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>漏洞危害</label>
+                                        <textarea id="manage-impact" rows="3" placeholder="描述漏洞带来的危害..."></textarea>
+                                    </div>
+
+                                    <div class="form-group">
+                                        <label>修复建议</label>
+                                        <textarea id="manage-suggestion" rows="3" required placeholder="提供修复方案..."></textarea>
+                                    </div>
+
+                                    <div class="manager-actions" style="margin-top: auto; padding-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
+                                        <button type="button" id="btn-manager-new" class="btn btn-primary" style="background-color: #4a90e2;">重置</button>
+                                        <button type="button" id="btn-manager-save" class="btn btn-success" style="background-color: #28a745; color: white;">保存到列表</button>
+                                        <button type="button" id="btn-manager-delete" class="btn btn-danger" style="background-color: #dc3545;">删除选中</button>
+                                    </div>
+                                </div>
+                            </div>
+                         </div>
+                    </div>
+
+                    <!-- View 3: ICP Manager -->
+                    <div id="view-icp-cache" class="toolbox-view">
+                         <div class="tools-layout" style="flex-direction: column;">
+                            <div class="column-header" style="justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; margin-bottom: 15px;">
+                                <div style="display:flex; align-items:center; gap: 15px;">
+                                    <h3 style="margin:0;">ICP 备案信息库</h3>
+                                    <div class="input-group" style="width: 250px;">
+                                         <input type="text" id="icp-search" placeholder="搜索域名或单位名称..." class="form-input">
+                                    </div>
+                                </div>
+                                <div>
+                                    <button id="btn-icp-add" class="btn-mini" style="background-color: #28a745;">+ 新增</button>
+                                    <button id="btn-icp-batch-delete" class="btn-mini" style="background-color: #dc3545; display: none;">🗑️ 批量删除</button>
+                                </div>
+                            </div>
+                            
+                            <div id="icp-list-container" class="file-list-container" style="flex: 1;">
+                            </div>
+                         </div>
+                    </div>
+
+                    <!-- View 4: 模板管理 -->
+                    <div id="view-template" class="toolbox-view">
+                        <div class="tools-layout">
+                            <!-- 左侧：模板列表 -->
+                            <div class="tools-column source-column">
+                                <div class="column-header">
+                                    <div style="display:flex; align-items:center; gap: 10px;">
+                                        <h4 class="column-title">模板列表</h4>
+                                        <button id="btn-refresh-template-list" class="btn-icon-text" title="刷新模板列表">🔄 刷新</button>
+                                    </div>
+                                    <input type="text" id="template-search-input" placeholder="🔍 搜索模板..." style="padding: 6px 12px; border: 1px solid #ddd; border-radius: 4px; width: 200px; font-size: 13px;">
+                                </div>
+                                
+                                <div id="template-list-container" class="file-list-container">
+                                    <div style="text-align: center; padding: 40px; color: #999;">加载中...</div>
+                                </div>
+                            </div>
+
+                            <!-- 右侧：操作区 -->
+                            <div class="tools-column selected-column">
+                                <div class="column-header">
+                                    <h4 class="column-title">批量操作</h4>
+                                </div>
+                                
+                                <div style="padding: 15px; display: flex; flex-direction: column; gap: 12px;">
+                                    <div style="background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #e0e0e0;">
+                                        <h5 style="margin: 0 0 10px 0; color: #303133; font-size: 14px;">📥 导入模板</h5>
+                                        <div style="display: flex; flex-direction: column; gap: 8px;">
+                                            <button id="btn-toolbox-import-template" class="btn btn-primary" style="width: 100%; padding: 8px 12px; font-size: 13px;">
+                                                📥 导入单个
+                                            </button>
+                                            <button id="btn-toolbox-batch-import-templates" class="btn btn-secondary" style="width: 100%; padding: 8px 12px; font-size: 13px;">
+                                                📥 批量导入
+                                            </button>
+                                            <input type="file" id="toolbox-template-import-input" accept=".zip" style="display: none;">
+                                            <input type="file" id="toolbox-template-batch-import-input" accept=".zip" multiple style="display: none;">
+                                        </div>
+                                        <p style="margin: 8px 0 0 0; font-size: 11px; color: #909399; line-height: 1.4;">支持 .zip 格式</p>
+                                    </div>
+                                    
+                                    <div style="background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #e0e0e0;">
+                                        <h5 style="margin: 0 0 10px 0; color: #303133; font-size: 14px;">📦 批量导出</h5>
+                                        <button id="btn-batch-export-templates" class="btn btn-primary" style="width: 100%; padding: 8px 12px; font-size: 13px;" disabled>
+                                            📦 导出选中
+                                        </button>
+                                        <p style="margin: 8px 0 0 0; font-size: 11px; color: #909399; line-height: 1.4;">先勾选模板</p>
+                                    </div>
+                                    
+                                    <div style="background: #fef0f0; padding: 15px; border-radius: 6px; border: 1px solid #fde2e2;">
+                                        <h5 style="margin: 0 0 10px 0; color: #f56c6c; font-size: 14px;">🗑️ 批量删除</h5>
+                                        <button id="btn-batch-delete-templates" class="btn" style="width: 100%; padding: 8px 12px; font-size: 13px; background: #f56c6c; color: white;" disabled>
+                                            🗑️ 删除选中
+                                        </button>
+                                        <p style="margin: 8px 0 0 0; font-size: 11px; color: #909399; line-height: 1.4;">先勾选模板</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- View 5: 系统设置 -->
+                    <div id="view-settings" class="toolbox-view">
+                        <div style="max-width: 600px; margin: 30px auto; padding: 25px; background: #fff; border: 1px solid var(--border-color); border-radius: 8px;">
+                            <h3 style="margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 15px;">💾 数据备份</h3>
+                            <p style="color: #666; margin: 20px 0; line-height: 1.6;">建议定期备份数据库，以防止因重装软件、系统故障或迁移环境时导致辛辛苦苦整理的漏洞库与配置丢失。</p>
+                            
+                            <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; border: 1px solid #ddd; margin-top: 20px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between;">
+                                    <div>
+                                        <strong style="font-size: 16px;">全量数据库 (.db)</strong>
+                                        <div style="font-size: 13px; color: #888; margin-top: 5px;">包含自定义漏洞库、ICP 查询缓存及系统配置</div>
+                                    </div>
+                                    <button id="btn-backup-db" class="btn btn-primary" style="display: flex; align-items: center; gap: 8px;">
+                                        <span>⬇️</span> 导出备份
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 30px; font-size: 13px; color: #999;">
+                                提示：备份文件是一个标准的 SQLite 数据库文件，您可以使用 DB Browser for SQLite 等工具查看内容。
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>    <!-- Custom Confirm Modal -->
+    <div id="custom-confirm-modal" class="modal">
+        <div class="modal-content" style="max-width: 400px; text-align: center;">
+            <h3 style="margin-top:0;">系统提示</h3>
+            <p id="confirm-message" style="margin: 20px 0; font-size: 15px; color: #555;"></p>
+            <div style="display: flex; justify-content: center; gap: 15px; margin-top: 25px;">
+                <button id="btn-confirm-cancel" class="btn btn-secondary" style="min-width: 80px;">取消</button>
+                <button id="btn-confirm-ok" class="btn btn-primary" style="min-width: 80px;">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模板详情模态框 -->
+    <div id="template-detail-modal" class="modal" style="z-index: 2000;">
+        <div class="modal-content" style="max-width: 800px; max-height: 90vh; overflow-y: auto;">
+            <div class="modal-header">
+                <h3>📋 模板详情</h3>
+                <span class="close" onclick="document.getElementById('template-detail-modal').style.display='none'">&times;</span>
+            </div>
+            <div id="template-detail-content" style="padding: 20px;">
+                <!-- 详情内容将在这里动态渲染 -->
+            </div>
+        </div>
+    </div>
+
+    <!-- ICP 编辑模态框 -->
+    <div id="icp-edit-modal" class="modal" style="z-index: 2000;">
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3 id="icp-modal-title">编辑 ICP 信息</h3>
+                <span class="close-icp-modal" onclick="document.getElementById('icp-edit-modal').style.display='none'">&times;</span>
+            </div>
+            <div style="padding: 20px;">
+                <form id="icp-form">
+                    <input type="hidden" id="icp-id">
+                    <div class="form-group">
+                        <label>域名 *</label>
+                        <input type="text" id="icp-domain" required>
+                    </div>
+                    <div class="form-group">
+                        <label>单位名称 (natureName)</label>
+                        <input type="text" id="icp-natureName" placeholder="例如：某某科技有限公司">
+                    </div>
+                    <div class="form-group">
+                        <label>性质 (unitName)</label>
+                        <input type="text" id="icp-unitName" placeholder="例如：企业">
+                    </div>
+                    <div class="form-group">
+                        <label>主备案号</label>
+                        <input type="text" id="icp-mainLicence">
+                    </div>
+                    <div class="form-group">
+                        <label>服务备案号</label>
+                        <input type="text" id="icp-serviceLicence">
+                    </div>
+                    <div class="form-group">
+                        <label>更新时间</label>
+                        <input type="text" id="icp-updateTime" placeholder="YYYY-MM-DD">
+                    </div>
+                    <div style="text-align: right; margin-top: 20px;">
+                        <button type="button" class="btn btn-secondary" onclick="document.getElementById('icp-edit-modal').style.display='none'">取消</button>
+                        <button type="submit" class="btn btn-primary">保存</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 表单数据预览模态框 -->
+    <div id="preview-modal">
+        <div class="modal-content">
+            <h3>📋 表单数据预览</h3>
+            <pre id="preview-content"></pre>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="document.getElementById('preview-modal').style.display='none'">关闭</button>
+                <button class="btn btn-primary" onclick="navigator.clipboard.writeText(document.getElementById('preview-content').textContent); window.AppUtils && AppUtils.showToast('已复制到剪贴板', 'success');">📋 复制</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts (Modular split) -->
+    <script src="js/config.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/api.js"></script>
+    <script src="js/form-renderer.js"></script>
+    <script src="js/image-handler.js"></script>
+    <script src="js/vuln-manager.js"></script>
+    <script src="js/template-manager.js"></script>
+    <script src="js/toolbox.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

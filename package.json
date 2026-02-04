@@ -1,0 +1,110 @@
+{
+  "name": "report-electron-app",
+  "version": "0.17.7",
+  "description": "Electron version of ReportGenX",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/s1g0day/report_electron.git"
+  },
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "sync-version": "node scripts/sync-version.js",
+    "prestart": "npm run sync-version",
+    "predist": "npm run sync-version",
+    "dist": "electron-builder",
+    "postinstall": "electron-builder install-app-deps"
+  },
+  "build": {
+    "appId": "com.reportgenx.app",
+    "productName": "ReportGenX",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "backend/dist",
+        "to": "backend/dist",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "backend/config.yaml",
+        "to": "backend/config.yaml"
+      },
+      {
+        "from": "backend/templates",
+        "to": "backend/templates"
+      },
+      {
+        "from": "backend/data",
+        "to": "backend/data"
+      },
+      {
+        "from": "backend/output",
+        "to": "backend/output"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": true
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        },
+        {
+          "target": "zip",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "category": "public.app-category.productivity"
+    },
+    "dmg": {
+      "sign": false,
+      "artifactName": "${productName}-${version}-${arch}-unsigned.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb",
+        "rpm"
+      ],
+      "category": "Office",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    }
+  },
+  "keywords": [],
+  "author": {
+    "name": "ReportGenX Team",
+    "email": "support@reportgenx.com"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^39.3.0",
+    "electron-builder": "^26.4.0"
+  }
+}

@@ -1,0 +1,469 @@
+# 入侵痕迹报告模板 Schema
+# Template: intrusion_report
+# Version: 1.0.0
+
+id: intrusion_report
+name: 入侵痕迹报告
+description: 用于记录和报告系统入侵痕迹的分析报告模板
+version: "1.0.0"
+order: 2
+icon: ""
+author: ReportGenX Team
+create_time: "2026-01-26"
+update_time: "2026-01-26"
+
+# 模板文件 (相对于模板目录)
+template_file: template.docx
+
+# 字段分组定义
+field_groups:
+  - id: basic
+    name: 基础信息
+    icon: "📋"
+    order: 1
+    
+  - id: target
+    name: 受害主机信息
+    icon: "🖥️"
+    order: 2
+    
+  - id: intrusion
+    name: 入侵痕迹详情
+    icon: "🔍"
+    order: 3
+    
+  - id: timeline
+    name: 时间线分析
+    icon: "⏱️"
+    order: 4
+    
+  - id: evidence
+    name: 证据截图
+    icon: "📷"
+    order: 5
+
+# 数据源定义
+data_sources:
+  - id: intrusion_types
+    type: config
+    description: 入侵类型列表
+    config_key: intrusion_types
+    
+  - id: vulnerabilities
+    type: database
+    description: 漏洞库数据
+    
+  - id: severity_levels
+    type: config
+    description: 严重等级
+    config_key: severity_levels
+    
+  - id: unit_types
+    type: config
+    description: 单位类型
+    config_key: unitType
+    
+  - id: industries
+    type: config
+    description: 所属行业
+    config_key: industry
+
+# 字段定义
+fields:
+  # ===== 基础信息组 =====
+  - key: report_id
+    label: 报告编号
+    type: text
+    required: true
+    group: basic
+    order: 1
+    readonly: true
+    auto_generate: true
+    auto_generate_rule: "RQBG-{date:YYYYMMDD}-{seq:4}"
+    placeholder: 自动生成
+    help_text: 系统自动生成，格式为 RQBG-日期-序号
+    template_placeholder: "#report_id#"
+    
+  - key: intrusion_type
+    label: 入侵类型
+    type: select
+    required: true
+    group: basic
+    order: 2
+    source: intrusion_types
+    options:
+      - value: webshell
+        label: Webshell植入
+      - value: backdoor
+        label: 后门程序
+      - value: malware
+        label: 恶意软件
+      - value: data_theft
+        label: 数据窃取
+      - value: privilege_escalation
+        label: 权限提升
+      - value: lateral_movement
+        label: 横向移动
+      - value: crypto_mining
+        label: 挖矿木马
+      - value: ransomware
+        label: 勒索软件
+      - value: other
+        label: 其他
+    template_placeholder: "#intrusion_type#"
+    
+  - key: severity_level
+    label: 严重等级
+    type: select
+    required: true
+    group: basic
+    order: 3
+    source: config.risk_levels
+    computed: true
+    compute_from: intrusion_type
+    compute_rule:
+      webshell: 高危
+      backdoor: 超危
+      malware: 高危
+      data_theft: 超危
+      privilege_escalation: 高危
+      lateral_movement: 超危
+      crypto_mining: 中危
+      ransomware: 超危
+      other: 中危
+    template_placeholder: "#severity_level#"
+    
+  - key: discovery_time
+    label: 发现时间
+    type: text
+    required: true
+    group: basic
+    order: 4
+    default: today
+    placeholder: "YYYY-MM-DD HH:mm"
+    template_placeholder: "#discovery_time#"
+    
+  - key: report_time
+    label: 报告时间
+    type: text
+    required: true
+    group: basic
+    order: 5
+    default: today
+    template_placeholder: "#report_time#"
+    
+  - key: analyst_name
+    label: 分析人员
+    type: text
+    required: true
+    group: basic
+    order: 6
+    source: config.supplierName
+    editable_config: true
+    template_placeholder: "#analyst_name#"
+
+  - key: supplier_name
+    label: 技术支持单位
+    type: text
+    group: basic
+    order: 7
+    required: false
+    source: config.supplierName
+    editable_config: true
+    save_to_config: true
+    template_placeholder: "#supplierName#"
+
+  # ===== 受害主机信息组 =====
+  - key: victim_ip
+    label: 受害主机IP
+    type: text
+    required: true
+    group: target
+    order: 1
+    placeholder: "192.168.1.100"
+    template_placeholder: "#victim_ip#"
+    
+  - key: victim_hostname
+    label: 主机名称
+    type: text
+    required: false
+    group: target
+    order: 2
+    template_placeholder: "#victim_hostname#"
+    
+  - key: victim_os
+    label: 操作系统
+    type: select
+    required: true
+    group: target
+    order: 3
+    options:
+      - Windows Server 2019
+      - Windows Server 2016
+      - Windows Server 2012
+      - Windows 10/11
+      - CentOS 7
+      - CentOS 8
+      - Ubuntu 18.04
+      - Ubuntu 20.04
+      - Ubuntu 22.04
+      - Debian
+      - RedHat
+      - 其他Linux
+      - 其他
+    template_placeholder: "#victim_os#"
+    
+  - key: victim_service
+    label: 受影响服务
+    type: text
+    required: false
+    group: target
+    order: 4
+    placeholder: "如: Apache, Nginx, MySQL"
+    template_placeholder: "#victim_service#"
+    
+  - key: unit_name
+    label: 所属单位
+    type: text
+    required: true
+    group: target
+    order: 5
+    template_placeholder: "#unit_name#"
+    
+  - key: unit_type
+    label: 单位类型
+    type: select
+    required: false
+    group: target
+    order: 6
+    source: unit_types
+    template_placeholder: "#unit_type#"
+    
+  - key: industry
+    label: 所属行业
+    type: select
+    required: false
+    group: target
+    order: 7
+    source: industries
+    template_placeholder: "#industry#"
+    
+  - key: contact_person
+    label: 联系人
+    type: text
+    required: false
+    group: target
+    order: 8
+    template_placeholder: "#contact_person#"
+    
+  - key: contact_phone
+    label: 联系电话
+    type: text
+    required: false
+    group: target
+    order: 9
+    template_placeholder: "#contact_phone#"
+
+  # ===== 入侵痕迹详情组 =====
+  - key: attack_method
+    label: 攻击手法 (从漏洞库选择)
+    type: searchable_select
+    required: false
+    group: intrusion
+    order: 1
+    source: vulnerabilities
+    search_placeholder: 输入关键词快速筛选漏洞...
+    display_field: name
+    value_field: id
+    help_text: 从漏洞库中选择攻击手法
+    template_placeholder: "#attack_method#"
+    
+  - key: attack_method_custom
+    label: 自定义攻击手法
+    type: text
+    required: false
+    group: intrusion
+    order: 1.5
+    placeholder: 如漏洞库中没有，请手动输入攻击手法
+    help_text: 如漏洞库中没有合适的选项，可以手动输入
+    
+  - key: malware_name
+    label: 恶意程序名称
+    type: text
+    required: false
+    group: intrusion
+    order: 2
+    placeholder: "如发现恶意程序，填写名称"
+    template_placeholder: "#malware_name#"
+    
+  - key: malware_path
+    label: 恶意程序路径
+    type: text
+    required: false
+    group: intrusion
+    order: 3
+    placeholder: "/var/www/html/shell.php"
+    template_placeholder: "#malware_path#"
+    
+  - key: malware_hash
+    label: 文件Hash (MD5/SHA256)
+    type: text
+    required: false
+    group: intrusion
+    order: 4
+    placeholder: "32位MD5或64位SHA256"
+    template_placeholder: "#malware_hash#"
+    
+  - key: c2_address
+    label: C2服务器地址
+    type: text
+    required: false
+    group: intrusion
+    order: 5
+    placeholder: "IP或域名"
+    template_placeholder: "#c2_address#"
+    
+  - key: intrusion_description
+    label: 入侵痕迹描述
+    type: textarea
+    required: true
+    group: intrusion
+    order: 6
+    rows: 5
+    placeholder: "详细描述发现的入侵痕迹..."
+    template_placeholder: "#intrusion_description#"
+    
+  - key: impact_assessment
+    label: 影响评估
+    type: textarea
+    required: true
+    group: intrusion
+    order: 7
+    rows: 4
+    placeholder: "评估此次入侵对系统和业务的影响..."
+    template_placeholder: "#impact_assessment#"
+    
+  - key: remediation_suggestion
+    label: 处置建议
+    type: textarea
+    required: true
+    group: intrusion
+    order: 8
+    rows: 4
+    placeholder: "提供针对性的处置和加固建议..."
+    template_placeholder: "#remediation_suggestion#"
+
+  # ===== 时间线分析组 =====
+  - key: first_access_time
+    label: 首次入侵时间
+    type: text
+    required: false
+    group: timeline
+    order: 1
+    placeholder: "YYYY-MM-DD HH:mm (如能确定)"
+    template_placeholder: "#first_access_time#"
+    
+  - key: persistence_time
+    label: 驻留时长
+    type: text
+    required: false
+    group: timeline
+    order: 2
+    placeholder: "如: 3天, 2周"
+    template_placeholder: "#persistence_time#"
+    
+  - key: timeline_detail
+    label: 攻击时间线
+    type: textarea
+    required: false
+    group: timeline
+    order: 3
+    rows: 6
+    placeholder: "按时间顺序描述攻击者的行为轨迹..."
+    template_placeholder: "#timeline_detail#"
+
+  # ===== 证据截图组 =====
+  - key: evidence_images
+    label: 入侵痕迹截图
+    type: image_list
+    required: false
+    group: evidence
+    order: 1
+    max_count: 10
+    accept: "image/*"
+    paste_enabled: true
+    with_description: true
+    description_placeholder: "描述此截图展示的入侵痕迹..."
+    
+  - key: log_evidence
+    label: 日志证据截图
+    type: image_list
+    required: false
+    group: evidence
+    order: 2
+    max_count: 5
+    accept: "image/*"
+    paste_enabled: true
+    with_description: true
+    description_placeholder: "描述日志中发现的异常..."
+
+  - key: remarks
+    label: 备注
+    type: textarea
+    required: false
+    group: basic
+    order: 10
+    rows: 2
+    template_placeholder: "#remarks#"
+
+# 行为定义
+behaviors:
+  - id: auto_severity
+    trigger:
+      field: intrusion_type
+      event: change
+    actions:
+      - type: compute
+        target: severity_level
+        rules:
+          webshell: 高危
+          backdoor: 超危
+          malware: 高危
+          data_theft: 超危
+          privilege_escalation: 高危
+          lateral_movement: 超危
+          crypto_mining: 中危
+          ransomware: 超危
+          other: 中危
+
+# 验证规则
+validation:
+  rules:
+    - fields: [victim_ip, intrusion_type, intrusion_description]
+      rule: required
+      message: "请填写完整的入侵痕迹信息"
+    - fields: [unit_name]
+      rule: required
+      message: "请填写所属单位名称"
+
+# 输出配置
+output:
+  filename_pattern: "{unit_name}_入侵痕迹报告_{report_id}_{date}.docx"
+  output_dir: "{unit_name}"
+  log_to_file: true
+  log_pattern: "{date}_intrusion_output.txt"
+
+# 预览配置
+preview:
+  title: "入侵痕迹报告预览"
+  fields:
+    - key: report_id
+      label: 报告编号
+    - key: intrusion_type
+      label: 入侵类型
+    - key: severity_level
+      label: 严重等级
+    - key: victim_ip
+      label: 受害主机IP
+    - key: unit_name
+      label: 所属单位

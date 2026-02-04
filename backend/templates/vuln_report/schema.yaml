@@ -1,0 +1,425 @@
+# =============================================================================
+# 模板元数据定义文件 - 漏洞报告 (vuln_report)
+# =============================================================================
+# 此文件定义了模板的所有字段、分组、数据源引用和行为规则
+# 前端会根据此 schema 动态生成表单，后端根据此 schema 进行数据验证和处理
+# =============================================================================
+
+# --- 基本信息 ---
+id: vuln_report
+name: 风险隐患报告
+description: 用于生成网络安全风险隐患报告，适用于漏洞通报、安全检查等场景
+version: "1.0.0"
+order: 1
+template_file: template.docx
+icon: ""
+author: ReportGenX Team
+create_time: "2026-01-24"
+update_time: "2026-01-24"
+
+# --- 字段分组定义 ---
+# 控制前端表单的分块显示
+field_groups:
+  - id: basic
+    name: 基础信息
+    icon: "📋"
+    order: 1
+    collapsed: false  # 默认是否折叠
+    
+  - id: target
+    name: 目标资产信息
+    icon: "🎯"
+    order: 2
+    collapsed: false
+    
+  - id: vuln
+    name: 漏洞详情
+    icon: "🔍"
+    order: 3
+    collapsed: false
+    
+  - id: evidence
+    name: 漏洞复现证据
+    icon: "📷"
+    order: 4
+    collapsed: false
+
+# --- 共享数据源定义 ---
+# 声明此模板需要的数据源，后端会根据这些定义加载数据
+data_sources:
+  - id: vulnerabilities
+    type: database
+    description: 漏洞库数据
+    
+  - id: icp_cache
+    type: database
+    description: ICP 备案缓存库
+    
+  - id: hazard_types
+    type: config
+    config_key: hazard_type
+    description: 隐患类型选项
+    
+  - id: unit_types
+    type: config
+    config_key: unitType
+    description: 单位类型选项
+    
+  - id: industries
+    type: config
+    config_key: industry
+    description: 行业类型选项
+
+# --- 字段定义 ---
+# 每个字段对应模板中的一个占位符 (不含 #)
+fields:
+  # ========== 基础信息组 ==========
+  - key: vulnerability_id
+    label: 隐患编号
+    type: text
+    group: basic
+    order: 1
+    required: false
+    readonly: true
+    auto_generate: true
+    auto_generate_rule: "YHBH-{date:YYYYMMDD}-{seq:4}"
+    placeholder: 自动生成
+    help_text: 系统自动生成，格式为 YHBH-日期-序号
+    template_placeholder: "#vulnerability_id#"
+    
+  - key: hazard_type
+    label: 隐患类型
+    type: select
+    group: basic
+    order: 2
+    required: true
+    source: hazard_types
+    default: 漏洞报告
+    template_placeholder: "#hazard_type#"
+    
+  - key: discovery_date
+    label: 发现时间
+    type: date
+    group: basic
+    order: 3
+    required: true
+    default: today
+    format: "YYYY-MM-DD"
+    template_placeholder: "#discoveryDate#"
+    
+  - key: hazard_level
+    label: 隐患级别
+    type: select
+    group: basic
+    order: 4
+    required: true
+    source: config.risk_levels
+    default: 高危
+    on_change: update_alert_level
+    template_placeholder: "#hazardLevel#"
+    
+  - key: alert_level
+    label: 预警级别
+    type: text
+    group: basic
+    order: 5
+    required: false
+    readonly: true
+    computed: true
+    compute_from: hazard_level
+    compute_rule:
+      超危: 1级
+      高危: 2级
+      中危: 3级
+      低危: 4级
+      信息性: 5级
+    template_placeholder: "#alertLevel#"
+    
+  - key: unit_type
+    label: 单位类型
+    type: select
+    group: basic
+    order: 6
+    required: true
+    source: unit_types
+    default: 民营企业
+    template_placeholder: "#unitType#"
+    
+  - key: industry
+    label: 所属行业
+    type: select
+    group: basic
+    order: 7
+    required: true
+    source: industries
+    default: 科技
+    template_placeholder: "#industry#"
+    
+  - key: supplier_name
+    label: 技术支持单位
+    type: text
+    group: basic
+    order: 8
+    required: false
+    source: config.supplierName
+    editable_config: true
+    save_to_config: true
+    template_placeholder: "#supplierName#"
+
+  # ========== 目标资产信息组 ==========
+  - key: url
+    label: 隐患 URL / IP
+    type: text
+    group: target
+    order: 1
+    required: true
+    placeholder: "http://example.com/admin"
+    help_text: 输入后自动解析域名和IP，支持粘贴
+    on_change: resolve_url
+    validation:
+      pattern: "^(https?://|\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}).*"
+      message: 请输入有效的 URL 或 IP 地址
+    template_placeholder: "#target#"
+    
+  - key: website_name
+    label: 网站名称
+    type: text
+    group: target
+    order: 2
+    required: false
+    auto_fill_from: icp_lookup
+    template_placeholder: "#websiteName#"
+    
+  - key: domain
+    label: 网站域名
+    type: text
+    group: target
+    order: 3
+    required: false
+    auto_fill_from: url_parse
+    template_placeholder: "#domain#"
+    
+  - key: ip
+    label: 网站 IP
+    type: text
+    group: target
+    order: 4
+    required: false
+    auto_fill_from: url_resolve
+    template_placeholder: "#ip#"
+    
+  - key: unit_name
+    label: 单位名称
+    type: text
+    group: target
+    order: 5
+    required: true
+    auto_fill_from: icp_lookup
+    template_placeholder: "#customerCompanyName#"
+    
+  - key: icp_number
+    label: 备案号
+    type: text
+    group: target
+    order: 6
+    required: false
+    auto_fill_from: icp_lookup
+    template_placeholder: "#icpNumber#"
+    
+  - key: city
+    label: 城市
+    type: text
+    group: target
+    order: 7
+    required: false
+    default: 北京
+    source: config.city
+    inline_group: region_group
+    template_placeholder: "#city#"
+    
+  - key: region
+    label: 地区
+    type: text
+    group: target
+    order: 8
+    required: false
+    default: 海淀区
+    source: config.region
+    inline_group: region_group
+    template_placeholder: "#region#"
+    
+  - key: icp_screenshot
+    label: 工信备案截图
+    type: image
+    group: target
+    order: 9
+    required: false
+    accept: ".png,.jpg,.jpeg,.gif,.bmp"
+    max_size_mb: 5
+    help_text: 点击上传或粘贴备案截图
+    paste_enabled: true
+    template_placeholder: "#icpScreenshot#"
+
+  # ========== 漏洞详情组 ==========
+  - key: vul_name_select
+    label: 漏洞名称 (从库中选)
+    type: searchable_select
+    group: vuln
+    order: 1
+    required: false
+    source: vulnerabilities
+    search_placeholder: 输入关键词快速筛选...
+    on_change: fill_vuln_details
+    display_field: name
+    value_field: id
+    
+  - key: vul_name
+    label: 自定义漏洞名称
+    type: text
+    group: vuln
+    order: 2
+    required: true
+    placeholder: 如库中没有，请手动输入
+    help_text: 如库中没有，请手动输入
+    template_placeholder: "#vulName#"
+    
+  - key: vul_description
+    label: 漏洞描述
+    type: textarea
+    group: vuln
+    order: 3
+    required: true
+    rows: 4
+    auto_fill_from: vuln_select
+    fill_field: Vuln_Description
+    template_placeholder: "#vulDescription#"
+    
+  - key: vul_harm
+    label: 漏洞危害
+    type: textarea
+    group: vuln
+    order: 4
+    required: false
+    rows: 3
+    auto_fill_from: vuln_select
+    fill_field: Vuln_Impact
+    template_placeholder: "#vulHarm#"
+    
+  - key: repair_suggestion
+    label: 修复建议
+    type: textarea
+    group: vuln
+    order: 5
+    required: true
+    rows: 3
+    auto_fill_from: vuln_select
+    fill_field: Repair_suggestions
+    template_placeholder: "#repairSuggestion#"
+    
+  - key: remarks
+    label: 备注
+    type: text
+    group: vuln
+    order: 6
+    required: false
+    template_placeholder: "#remarks#"
+
+  # ========== 漏洞复现证据组 ==========
+  - key: vuln_evidence_images
+    label: 漏洞截图
+    type: image_list
+    group: evidence
+    order: 1
+    required: false
+    accept: ".png,.jpg,.jpeg,.gif,.bmp"
+    max_size_mb: 5
+    with_description: true
+    description_placeholder: 请输入截图说明...
+    paste_enabled: true
+    help_text: 点击上传或粘贴漏洞证明截图
+    template_placeholder: "#vulnEvidenceImages#"
+
+# --- 行为定义 ---
+# 定义字段间的联动关系和自动化操作
+behaviors:
+  - id: resolve_url
+    trigger:
+      field: url
+      event: change
+    actions:
+      - type: api_call
+        endpoint: /api/process-url
+        params:
+          url: "${url}"
+        result_mapping:
+          domain: domain
+          ip: ip
+          "icp_info.unitName": unit_name
+          "icp_info.mainLicence": icp_number
+          "icp_info.serviceName": website_name
+          
+  - id: update_alert_level
+    trigger:
+      field: hazard_level
+      event: change
+    actions:
+      - type: compute
+        target: alert_level
+        rules:
+          超危: 1级
+          高危: 2级
+          中危: 3级
+          低危: 4级
+          信息性: 5级
+          
+  - id: fill_vuln_details
+    trigger:
+      field: vul_name_select
+      event: change
+    actions:
+      - type: api_call
+        endpoint: /api/vulnerability/${vul_name_select}
+        result_mapping:
+          Vuln_Name: vul_name
+          Vuln_Description: vul_description
+          Vuln_Impact: vul_harm
+          Repair_suggestions: repair_suggestion
+          Hazard_level: hazard_level
+
+# --- 验证规则 ---
+# 表单提交前的验证
+validation:
+  rules:
+    - fields: [vul_name, vul_description, repair_suggestion]
+      rule: required
+      message: 漏洞名称、描述和修复建议为必填项
+      
+    - fields: [unit_name]
+      rule: required
+      message: 单位名称为必填项
+      
+  custom_validators:
+    - id: url_format
+      field: url
+      validator: url_or_ip
+      message: 请输入有效的 URL 或 IP 地址
+
+# --- 输出配置 ---
+output:
+  filename_pattern: "{unit_name}_{vul_name}_{date}.docx"
+  output_dir: "output/report/{unit_name}"
+  log_to_db: true
+  log_table: report
+
+# --- 预览配置 ---
+preview:
+  enabled: true
+  fields:
+    - key: unit_name
+      label: 单位
+    - key: vul_name
+      label: 漏洞
+    - key: hazard_level
+      label: 级别
+    - key: url
+      label: 目标

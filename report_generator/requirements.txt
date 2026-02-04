@@ -1,6 +1,0 @@
-python_docx
-PyYAML
-tldextract
-openpyxl
-pandas
-PyQt6
