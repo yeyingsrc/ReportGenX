@@ -7,26 +7,14 @@ import os
 import sys
 from PyInstaller.utils.hooks import collect_data_files
 
-# 收集 docxcompose 的数据文件（包括模板文件）
+# 收集第三方库的数据文件
 docxcompose_data = collect_data_files('docxcompose')
+docx_data = collect_data_files('docx')
 
-# 打印收集的数据文件，用于调试
-print("Collected docxcompose data files:")
-for file in docxcompose_data:
-    print(f"  - {file}")
-
-# 添加应用必需的资源文件
-# 注意：templates/ 目录不打包，应放在外部以支持动态添加
 app_datas = [
-    *docxcompose_data,           # docxcompose 库的数据文件
-    # ('config.yaml', '.'),        # 全局配置文件 (Removed: handled by electron extraResources)
-    # ('data/combined.db', 'data'), # 漏洞库和 ICP 备案数据库 (Removed: handled by electron extraResources)
+    *docxcompose_data,
+    *docx_data,
 ]
-
-print("\nApplication data files to be included:")
-print("  - config.yaml -> .")
-print("  - data/combined.db -> data")
-print("  [INFO] templates/ directory excluded (external for dynamic loading)")
 
 a = Analysis(['api.py'],
              pathex=['.'],
@@ -61,8 +49,8 @@ a = Analysis(['api.py'],
                  'uvicorn.lifespan',
                  'uvicorn.lifespan.on',
              ],
-             hookspath=[],
-             runtime_hooks=[],
+             hookspath=['hooks'],
+             runtime_hooks=['hooks/runtime_hook_docx.py'],
              excludes=[
                  # 排除模板模块（templates/ 目录应在外部）
                  'templates',
