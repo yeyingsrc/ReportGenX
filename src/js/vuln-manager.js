@@ -230,34 +230,22 @@ window.AppVulnManager = {
         };
 
         try {
-            let res;
+            let result;
             if (id) {
                 // Update
-                res = await fetch(`${window.AppAPI.BASE_URL}/api/vulnerabilities/${encodeURIComponent(id)}`, {
-                    method: 'PUT',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(data)
-                });
+                result = await window.AppAPI.updateVulnerability(id, data);
             } else {
                 // Create
-                res = await fetch(`${window.AppAPI.BASE_URL}/api/vulnerabilities`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify(data)
-                });
+                result = await window.AppAPI.saveVulnerability(data);
             }
             
-            const result = await res.json();
-            if (res.ok) {
-                AppUtils.showToast(result.message || "保存成功", "success");
-                await this.loadVulnerabilities(); // Refresh List
-                if(!id) this.resetForm(); // If new, clear form. If update, keep looking at it.
-            } else {
-                AppUtils.showToast("失败: " + (result.detail || result.message), "error");
-            }
+            AppUtils.showToast(result.message || "保存成功", "success");
+            await this.loadVulnerabilities(); // Refresh List
+            if(!id) this.resetForm(); // If new, clear form. 
+            
         } catch(e) {
             console.error(e);
-            AppUtils.showToast("网络请求错误", "error");
+            AppUtils.showToast(e.message || "操作失败", "error");
         } finally {
             if(btn) btn.disabled = false;
         }
@@ -271,19 +259,13 @@ window.AppVulnManager = {
         
         if (await AppUtils.safeConfirm("确定要删除该漏洞吗？此操作不可恢复。")) {
             try {
-                const res = await fetch(`${window.AppAPI.BASE_URL}/api/vulnerabilities/${encodeURIComponent(id)}`, { method: 'DELETE' });
-                const result = await res.json();
-                
-                if (res.ok) {
-                    AppUtils.showToast(result.message || "删除成功", "success");
-                    this.resetForm();
-                    await this.loadVulnerabilities();
-                } else {
-                    AppUtils.showToast("删除失败: " + (result.detail || result.message), "error");
-                }
+                const result = await window.AppAPI.deleteVulnerability(id);
+                AppUtils.showToast(result.message || "删除成功", "success");
+                this.resetForm();
+                await this.loadVulnerabilities();
             } catch(e) { 
                 console.error(e);
-                AppUtils.showToast("网络请求错误", "error"); 
+                AppUtils.showToast(e.message || "删除失败", "error"); 
             }
         }
     },

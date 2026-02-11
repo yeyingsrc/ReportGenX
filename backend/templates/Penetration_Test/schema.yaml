@@ -1,0 +1,544 @@
+# =============================================================================
+# 模板元数据定义文件 - 渗透测试报告 (Penetration_Test)
+# =============================================================================
+# 此文件定义了模板的所有字段、分组、数据源引用和行为规则
+# =============================================================================
+
+# --- 基本信息 ---
+id: Penetration_Test
+name: 渗透测试报告
+description: 用于生成渗透测试报告，包含测试范围、漏洞详情、风险评估等内容
+version: "1.0.0"
+order: 3
+template_file: template.docx
+icon: ""
+author: ReportGenX Team
+create_time: "2026-01-30"
+update_time: "2026-01-30"
+
+# --- 字段分组定义 ---
+field_groups:
+  - id: basic
+    name: 基础信息
+    icon: "📋"
+    order: 1
+    collapsed: false
+    
+  - id: test_info
+    name: 测试信息
+    icon: "🔍"
+    order: 2
+    collapsed: false
+    
+  - id: system_intro
+    name: 业务系统简介
+    icon: "📝"
+    order: 3
+    collapsed: true
+    
+  - id: summary
+    name: 摘要与结论
+    icon: "📊"
+    order: 4
+    collapsed: false
+    
+  - id: vulns
+    name: 漏洞信息
+    icon: "🐛"
+    order: 5
+    collapsed: false
+
+# --- 数据源定义 ---
+data_sources:
+  - id: vulnerabilities
+    type: database
+    description: 漏洞库数据
+    
+  - id: unit_types
+    type: config
+    config_key: unitType
+    description: 单位类型选项
+    
+  - id: industries
+    type: config
+    config_key: industry
+    description: 行业类型选项
+
+# --- 字段定义 ---
+fields:
+  # ========== 基础信息组 ==========
+  - key: unit_name
+    label: 单位名称
+    type: text
+    group: basic
+    order: 1
+    required: true
+    placeholder: 请输入被测单位名称
+    template_placeholder: "#unit_name#"
+    
+  - key: system_full_name
+    label: 系统名称
+    type: text
+    group: basic
+    order: 2
+    required: true
+    placeholder: 如：XX系统XX
+    help_text: 用于报告封面、标题和页眉
+    template_placeholder: "#system_full_name#"
+    
+  - key: supplier_name
+    label: 技术支持单位
+    type: text
+    group: basic
+    order: 3
+    required: true
+    source: config.supplierName
+    editable_config: true
+    save_to_config: true
+    placeholder: 请输入技术支持单位名称
+    help_text: 提供渗透测试服务的单位
+    template_placeholder: "#supplier_name#"
+
+  - key: test_start_date
+    label: 测试开始时间
+    type: date
+    group: basic
+    order: 4
+    required: true
+    default: today
+    template_placeholder: "#test_start_date#"
+    
+  - key: test_end_date
+    label: 测试结束时间
+    type: date
+    group: basic
+    order: 5
+    required: true
+    default: today
+    template_placeholder: "#test_end_date#"
+    
+  - key: report_date
+    label: 报告日期
+    type: date
+    group: basic
+    order: 6
+    required: true
+    default: today
+    template_placeholder: "#report_date#"
+    
+  - key: tester_info_list
+    label: 测试人员信息
+    type: tester_info_list
+    group: test_info
+    order: 1
+    required: false
+    help_text: 点击添加测试人员信息，可添加多条
+    template_placeholder: "#tester_info_list#"
+    columns:
+      - key: tester_company
+        label: 测试人员单位
+        type: text
+        placeholder: 测试人员所属单位
+        source: config.supplierName
+        width: 50%
+      - key: tester_ip
+        label: 测试人员IP
+        type: text
+        placeholder: 测试人员使用的IP地址
+        width: 50%
+
+  # ========== 测试信息组 ==========
+  - key: test_targets
+    label: 测试目标列表
+    type: target_list
+    group: test_info
+    order: 2
+    required: true
+    help_text: 点击添加测试目标，可添加多个
+    template_placeholder: "#test_targets#"
+    columns:
+      - key: system_name
+        label: 应用系统名称
+        type: text
+        placeholder: 如：XX业务系统
+        template_placeholder: "#system_name#"
+        width: 25%
+      - key: system_url
+        label: 应用系统URL/IP
+        type: text
+        placeholder: http://example.com 或 192.168.1.1
+        template_placeholder: "#system_url#"
+        width: 30%
+      - key: system_port
+        label: 端口
+        type: text
+        placeholder: "80"
+        default: "80"
+        template_placeholder: "#system_port#"
+        width: 15%
+      - key: test_account
+        label: 测试账号
+        type: text
+        placeholder: 无
+        default: 无
+        template_placeholder: "#test_account#"
+        width: 20%
+    
+  - key: system_intro_enabled
+    label: 启用业务系统简介章节
+    type: checkbox
+    group: system_intro
+    order: 1
+    required: false
+    default: false
+    help_text: 启用后将在报告中插入独立的"业务系统简介"章节
+    template_placeholder: "#system_intro_enabled#"
+    
+  - key: system_intro
+    label: 业务系统简介
+    type: textarea
+    group: system_intro
+    order: 2
+    required: false
+    rows: 4
+    placeholder: 简要描述系统功能和业务场景（可选）
+    help_text: 若系统功能简单且无高危漏洞可不填
+    template_placeholder: "#system_intro#"
+    
+  - key: system_intro_screenshots
+    label: 系统截图
+    type: image_list
+    group: system_intro
+    order: 3
+    required: false
+    max_count: 10
+    accept: "image/*"
+    paste_enabled: true
+    with_description: true
+    description_placeholder: "描述此截图展示的系统界面..."
+    help_text: 业务系统界面截图，支持多张
+    template_placeholder: "#system_intro_screenshots#"
+
+  # ========== 摘要与结论组 ==========
+  - key: overall_risk_level
+    label: 综合风险评级
+    type: select
+    group: summary
+    order: 7
+    required: true
+    options:
+      - value: 无风险
+        label: 无风险
+        color: "#198754"
+      - value: 低风险
+        label: 低风险
+        color: "#28a745"
+      - value: 中风险
+        label: 中风险
+        color: "#fd7e14"
+      - value: 高风险
+        label: 高风险
+        color: "#dc3545"
+    default: 中风险
+    template_placeholder: "#overall_risk_level#"
+    presets:
+      无风险:
+        risk_assessment: "从本次渗透测试结果来看，#system_full_name#业务相关系统在安全防护方面表现出色，成功抵御所有攻击模拟，展现出极高的安全性和有效的防护措施"
+        risk_suggestion: "即便系统在安全防护方面表现出色，仍建议从以下几个方面进行安全整改及防范，以进一步提高网络安全防护和管理水平："
+        remediation_measures:
+          - security_audit
+          - training
+          - regular_review
+      低风险:
+        risk_assessment: "从本次渗透测试结果来看，#system_full_name#业务相关系统在安全性上表现良好，虽然没有发现重大漏洞，但仍需留意潜在威胁，以确保安全防护继续保持在高水平。"
+        risk_suggestion: "虽然系统整体安全性良好，但仍需注意潜在威胁，建议从以下几个方面进行整改及防范："
+        remediation_measures:
+          - monitoring_logging
+          - regular_review
+          - training
+      中风险:
+        risk_assessment: "从本次渗透测试结果来看，#system_full_name#业务相关系统未发现严重漏洞，但系统仍可能面临有组织的、高级别的攻击风险。"
+        risk_suggestion: "鉴于系统可能面临有组织的、高级别的攻击风险，建议立即采取以下整改措施："
+        remediation_measures:
+          - access_control
+          - security_audit
+          - patch_management
+      高风险:
+        risk_assessment: "从本次渗透测试结果来看，#system_full_name#业务相关系统在安全防护上存在明显缺陷，可以抵挡一定程度的攻击行为，但难以抵御有组织的、高级别的安全攻击。"
+        risk_suggestion: "由于系统在安全防护上存在明显缺陷，建议立即采取补救措施，包括："
+        remediation_measures:
+          - vuln_fix
+          - access_control
+          - security_audit
+          - backup_test
+    
+  - key: vuln_count_total
+    label: 漏洞总数
+    type: text
+    group: summary
+    order: 1
+    required: false
+    default: "0"
+    template_placeholder: "#vuln_count_total#"
+    
+  - key: vuln_count_critical
+    label: 超危漏洞数
+    type: text
+    group: summary
+    order: 2
+    required: false
+    default: "0"
+    template_placeholder: "#vuln_count_critical#"
+    
+  - key: vuln_count_high
+    label: 高危漏洞数
+    type: text
+    group: summary
+    order: 3
+    required: false
+    default: "0"
+    template_placeholder: "#vuln_count_high#"
+    
+  - key: vuln_count_medium
+    label: 中危漏洞数
+    type: text
+    group: summary
+    order: 4
+    required: false
+    default: "0"
+    template_placeholder: "#vuln_count_medium#"
+    
+  - key: vuln_count_low
+    label: 低危漏洞数
+    type: text
+    group: summary
+    order: 5
+    required: false
+    default: "0"
+    template_placeholder: "#vuln_count_low#"
+    
+  - key: vuln_count_info
+    label: 其他漏洞数
+    type: text
+    group: summary
+    order: 6
+    required: false
+    default: "0"
+    template_placeholder: "#vuln_count_info#"
+    
+  - key: vuln_list_summary
+    label: 漏洞汇总描述
+    type: textarea
+    group: summary
+    order: 8
+    required: false
+    rows: 2
+    placeholder: 如：任意文件上传、未授权访问、SQL注入等漏洞
+    help_text: 简要列出发现的主要漏洞类型
+    template_placeholder: "#vuln_list_summary#"
+    
+  - key: risk_assessment
+    label: 结果评估
+    type: textarea
+    group: summary
+    order: 9
+    required: false
+    rows: 3
+    placeholder: 根据风险等级自动填充或手动输入
+    help_text: 根据综合风险评级描述系统安全状况
+    template_placeholder: "#risk_assessment#"
+    
+  - key: risk_suggestion
+    label: 建议描述
+    type: textarea
+    group: summary
+    order: 10
+    required: false
+    rows: 2
+    placeholder: 根据风险等级自动填充或手动输入
+    help_text: 针对风险等级的整改建议引导语
+    template_placeholder: "#risk_suggestion#"
+    
+  - key: remediation_measures
+    label: 整改建议
+    type: checkbox_group
+    group: summary
+    order: 11
+    required: false
+    help_text: 选择适用的整改建议，可多选
+    template_placeholder: "#remediation_measures#"
+    options:
+      - id: update_password
+        label: 定期更新密码
+        description: "定期更新密码：建议每三个到六个月更换一次密码。这样可以确保即使密码被泄露，攻击者也无法长时间访问您的账户。"
+      - id: update_system
+        label: 更新网站系统
+        description: "更新网站系统：老旧的网站系统容易受到安全漏洞的攻击，建议及时更新和升级网站系统到最新版本。确保使用的网站平台、内容管理系统（CMS）或其他相关软件都是最新的，以修复已知漏洞并提高系统的安全性。"
+      - id: close_services
+        label: 关闭不必要的服务
+        description: "关闭不必要的服务：根据您的需求和系统配置，停止或禁用不必要的服务。这可以通过服务管理工具或操作系统的服务配置来完成。确保只保留必要的服务运行。"
+      - id: access_control
+        label: 强化访问控制
+        description: "强化访问控制：采取适当的访问控制策略，限制内网资源的访问权限。使用强密码和多因素身份验证，限制特权访问，并根据工作职责原则来分配权限，以减少内部威胁和数据泄露的风险。"
+      - id: patch_management
+        label: 及时的安全更新和补丁管理
+        description: "及时的安全更新和补丁管理：定期更新系统和应用程序，及时安装安全补丁，以修复已知的漏洞和弱点。这可以有效减少潜在的安全风险。"
+      - id: regular_review
+        label: 定期审查和更新
+        description: "定期审查和更新：定期审查系统的端口和服务配置，并根据需要进行更新。随着系统和需求的变化，可能会有新的端口和服务需要关闭或重新评估。"
+      - id: backup_test
+        label: 定期备份和恢复测试
+        description: "定期备份和恢复测试：定期备份重要的内网数据，并进行恢复测试，以确保数据的完整性和可恢复性。在发生安全事件或数据损坏时，备份可以帮助您快速恢复业务，并减少数据丢失的风险。"
+      - id: monitoring_logging
+        label: 监控和日志记录
+        description: "监控和日志记录：启用系统的监控和日志记录功能，以便及时检测和响应任何异常活动。监控网络流量、端口活动和服务日志，以发现潜在的安全问题。"
+      - id: security_audit
+        label: 安全审计和监控
+        description: "安全审计和监控：建立完善的安全审计和监控机制，对系统的活动进行实时监控和记录，及时发现异常行为和潜在的安全威胁。"
+      - id: training
+        label: 培训和意识提升
+        description: "培训和意识提升：注重培训员工的安全意识，定期组织安全培训和演练，确保员工了解安全最佳实践，并能够正确应对安全事件。"
+      - id: network_isolation
+        label: 内网隔离
+        description: "内网隔离：由于内网缺乏隔离，建议采取适当的网络隔离措施，如使用防火墙或虚拟专用网络（VPN）来限制办公网访问内网的范围。这样可以减少内网暴露给外部网络的风险，提高网络安全性。"
+      - id: security_review
+        label: 定期安全审查
+        description: "定期安全审查：定期进行安全审查和漏洞扫描，以发现和修复潜在的安全问题。可以使用安全评估工具或聘请专业的安全团队来评估您的网络和系统，以确保及时发现和解决安全漏洞。"
+      - id: employee_training
+        label: 加强员工安全意识培训
+        description: "加强员工安全意识培训：提供定期的安全意识培训，教育员工有关网络安全的最佳实践、社会工程学攻击的识别和防范等。员工是网络安全的第一道防线，他们的安全意识和行为对整体安全防护至关重要。"
+      - id: vuln_fix
+        label: 漏洞修复
+        description: "漏洞修复：针对存在的身份绕过漏洞和授权任意文件写入漏洞，建议立即升级或修补相关软件或系统组件，确保漏洞得到修复。"
+      - id: password_policy
+        label: 强化密码策略
+        description: "强化密码策略：针对服务器存在弱口令和密码复用的问题，建议强制要求使用强密码策略，包括密码长度、复杂性要求等。禁止使用默认账户和密码，确保每个账户都有独立、强密码。实施账户锁定机制，定期更新密码。"
+      - id: db_security
+        label: 数据库安全
+        description: "数据库安全：针对MySQL存在密码复用的问题，建议确保数据库密码是独立且强密码。避免在不同系统或服务中复用相同的数据库密码。定期审查数据库权限和访问控制，确保只有授权的用户可以访问数据库。"
+      - id: key_management
+        label: 访问密钥管理
+        description: "访问密钥管理：针对阿里云Accesskey泄露的问题，建议及时撤销泄露的Access Key，并生成新的密钥。实施访问密钥的合理管理和保护措施，例如使用访问密钥管理服务、限制访问密钥的使用范围等。"
+      - id: credential_protection
+        label: 凭据保护
+        description: "凭据保护：针对开发公司Harbor凭据泄露的问题，建议及时通知开发公司并协调解决凭据泄露问题。审查和更新所有与凭据相关的访问权限和密钥。"
+      - id: security_protection
+        label: 在安全防护方面
+        description: "在安全防护方面：建议完善安全基线并全面进行安全加固；加强办公终端管控，完善办公网络数据安全保护措施。"
+      - id: threat_detection
+        label: 在威胁发现方面
+        description: "在威胁发现方面：建议进一步加强APT攻击检测和威胁监测能力，加强日常安全检查力度，完善等级保护和风险评估机制，对安全加固和防护效果定期进行检查和评估，及时识别和消除风险。"
+      - id: security_management
+        label: 在安全管理方面
+        description: "在安全管理方面：建议继续加强全体系信息安全工作的整体管理和组织协调，强化人员安全意识，严格落实各项规章制度，继续加强安全开发和上线前安全测试工作，不断提升运维管理水平。"
+
+  # ========== 漏洞信息组 ==========
+  - key: vuln_details
+    label: 漏洞详情列表
+    type: vuln_list
+    group: vulns
+    order: 1
+    required: false
+    help_text: 点击添加漏洞，可从漏洞库选择或手动输入
+    template_placeholder: "#vuln_details#"
+    data_source: vulnerabilities
+    columns:
+      - key: vuln_system
+        label: 所属系统
+        type: text
+        required: true
+        placeholder: 如：门户网站、OA系统
+        help_text: 用于漏洞清单和详情标题，如"门户网站存在SQL注入漏洞"
+        width: 15%
+      - key: vuln_name
+        label: 漏洞名称
+        type: searchable_select
+        source: vulnerabilities
+        required: true
+        width: 20%
+        on_select: fill_vuln_fields
+      - key: vuln_level
+        label: 漏洞级别
+        type: select
+        source: config.risk_levels
+        default: 中危
+        width: 10%
+      - key: vuln_url
+        label: URL/IP
+        type: text
+        placeholder: 漏洞所在URL或IP地址
+        width: 20%
+      - key: vuln_location
+        label: 漏洞位置
+        type: text
+        placeholder: 如：登录页面、文件上传接口
+        width: 15%
+      - key: vuln_description
+        label: 漏洞及风险描述
+        type: textarea
+        rows: 3
+        placeholder: 漏洞的详细描述及可能造成的风险
+      - key: vuln_evidence
+        label: 漏洞举证
+        type: image_list
+        max_count: 5
+        accept: "image/*"
+        paste_enabled: true
+        with_description: true
+        description_placeholder: "截图说明..."
+      - key: vuln_suggestion
+        label: 修复建议
+        type: textarea
+        rows: 3
+        placeholder: 漏洞修复方案和建议
+      - key: vuln_reference
+        label: 参考链接
+        type: text
+        placeholder: 相关参考资料链接（可选）
+
+# --- 行为定义 ---
+behaviors:
+  - id: generate_doc_title
+    trigger:
+      field: system_full_name
+      event: change
+    actions:
+      - type: compute
+        target: doc_title
+        expression: "${system_full_name}业务相关系统渗透测试报告"
+        
+  - id: auto_distribution_scope
+    trigger:
+      field: unit_name
+      event: change
+    actions:
+      - type: compute
+        target: distribution_scope
+        expression: "限${supplier_name}、${unit_name}相关项目组"
+
+# --- 验证规则 ---
+validation:
+  rules:
+    - fields: [unit_name, system_full_name]
+      rule: required
+      message: 单位名称和系统名称为必填项
+
+# --- 输出配置 ---
+output:
+  filename_pattern: "{unit_name}-{system_full_name}业务相关系统-渗透测试报告.docx"
+  output_dir: "output/report/{unit_name}"
+  log_to_file: true
+  log_pattern: "{report_date}_penetration_output.txt"
+
+# --- 预览配置 ---
+preview:
+  enabled: true
+  fields:
+    - key: unit_name
+      label: 单位
+    - key: system_full_name
+      label: 系统
+    - key: overall_risk_level
+      label: 风险等级
+    - key: report_date
+      label: 报告日期

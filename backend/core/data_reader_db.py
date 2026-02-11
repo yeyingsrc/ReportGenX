@@ -6,7 +6,8 @@
 """
 
 import sqlite3
-# import pandas as pd
+import re
+import hashlib
 from datetime import datetime
 from .logger import setup_logger
 
@@ -84,8 +85,6 @@ class DbDataReader:
             vulnerability_list = [] # List of {id, name}
             vulnerabilities = {} # Map id -> details
             
-            import hashlib
-
             for row in rows:
                 # Get name from 'Vuln_Name' (English)
                 # row['Vuln_Name'] could be None
@@ -190,6 +189,14 @@ class DbDataReader:
 
     def _ensure_column_exists(self, conn, table_name, column_name, col_type="TEXT"):
         """确保表中存在指定列，如果不存在则添加"""
+        # Security: Validate identifiers
+        if not re.match(r'^[a-zA-Z0-9_]+$', table_name):
+             logger.error(f"Security check failed: Invalid table name '{table_name}'")
+             return False
+        if not re.match(r'^[a-zA-Z0-9_]+$', column_name):
+             logger.error(f"Security check failed: Invalid column name '{column_name}'")
+             return False
+
         try:
             cursor = conn.cursor()
             # 获取所有列名

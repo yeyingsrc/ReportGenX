@@ -5,6 +5,11 @@ import shutil
 import socket
 import sys
 import uuid
+import io
+import json
+import zipfile
+import subprocess
+import traceback
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
@@ -12,9 +17,10 @@ from urllib.parse import urlparse
 import tldextract
 import uvicorn
 import yaml
+from PIL import Image
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -24,6 +30,7 @@ from core.base_handler import HandlerRegistry
 from core.data_reader_db import DbDataReader
 from core.logger import setup_logger
 from core.template_manager import TemplateManager
+from core.report_merger import ReportMerger
 
 logger = setup_logger('API')
 
@@ -48,7 +55,6 @@ def load_config():
 
 def load_shared_config():
     """加载共享配置（服务器端口等）"""
-    import json
     if os.path.exists(SHARED_CONF_PATH):
         with open(SHARED_CONF_PATH, 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -84,7 +90,7 @@ def get_cached_vulnerabilities():
     """延迟加载漏洞缓存"""
     global _cached_vuln_list, _cached_vulnerabilities
     if _cached_vuln_list is None or _cached_vulnerabilities is None:
-        _cached_vuln_list, _cached_vulnerabilities = get_db_reader().read_vulnerabilities_from_db()
+        return reload_vulnerabilities_cache()
     return _cached_vuln_list, _cached_vulnerabilities
 
 
@@ -92,7 +98,7 @@ def get_cached_icp_infos():
     """延迟加载 ICP 备案缓存"""
     global _cached_icp_infos
     if _cached_icp_infos is None:
-        _cached_icp_infos = get_db_reader().read_Icp_from_db()
+        return reload_icp_cache()
     return _cached_icp_infos
 
 
@@ -123,8 +129,15 @@ def get_template_manager():
         
         # 动态挂载模板路由
         for template_id, router in _template_manager.get_template_routers().items():
-            app.include_router(router)
-            logger.info(f"Mounted router for template: {template_id}")
+            # Security Fix: 强制路由隔离，防止模板覆盖系统API或越权
+            # 所有模板定义的 API 必须通过 /api/plugin/{template_id}/ 访问
+            safe_prefix = f"/api/plugin/{template_id}"
+            app.include_router(
+                router, 
+                prefix=safe_prefix,
+                tags=[f"Plugin: {template_id}"]
+            )
+            logger.info(f"Mounted router for template: {template_id} at {safe_prefix}")
             
         # 输出已注册的 Handler（由动态加载自动注册）
         logger.info(f"Registered handlers: {HandlerRegistry.list_registered()}")
@@ -401,7 +414,7 @@ def process_url(req: UrlProcessRequest):
 
 @app.post("/api/upload-image", response_model=UploadImageResponse)
 def upload_image(req: UploadImageRequest):
-    """接收 Base64 图片，保存为临时文件，返回绝对路径"""
+    """接收 Base64 图片，保存为临时文件，返回绝对路径 (Security Fixed)"""
     try:
         if ',' in req.image_base64:
             header, encoded = req.image_base64.split(',', 1)
@@ -410,10 +423,37 @@ def upload_image(req: UploadImageRequest):
 
         data = base64.b64decode(encoded)
         
-        ext = ".png"
-        if req.filename and '.' in req.filename:
-            ext = os.path.splitext(req.filename)[1]
-            
+        # 安全检查 1: 文件大小限制 (10MB)
+        if len(data) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Image size exceeds 10MB limit")
+
+        # 安全检查 2: 验证图片格式与完整性
+        try:
+            with Image.open(io.BytesIO(data)) as img:
+                img.verify()  # 验证文件结构是否损坏
+                
+                # 重新打开以读取属性（verify后需重新打开）
+                with Image.open(io.BytesIO(data)) as valid_img:
+                    fmt = valid_img.format.lower()
+                    
+                    # 白名单格式检查
+                    ALLOWED_FORMATS = {'png', 'jpeg', 'jpg', 'gif', 'bmp'}
+                    if fmt not in ALLOWED_FORMATS:
+                        raise HTTPException(status_code=400, detail=f"Unsupported image format: {fmt}")
+                    
+                    # 像素炸弹防护 (限制分辨率 10000x10000)
+                    if valid_img.width * valid_img.height > 100000000:
+                         raise HTTPException(status_code=400, detail="Image dimensions too large")
+                        
+                    # 确定安全的文件后缀
+                    ext = f".{fmt}" if fmt != 'jpeg' else '.jpg'
+        except Exception as e:
+            if isinstance(e, HTTPException):
+                raise e
+            logger.warning(f"Invalid image upload attempt: {str(e)}")
+            raise HTTPException(status_code=400, detail="Invalid image file")
+
+        # 使用生成的安全文件名
         filename = f"{uuid.uuid4()}{ext}"
         file_path = os.path.join(TEMP_DIR, filename)
         
@@ -425,6 +465,9 @@ def upload_image(req: UploadImageRequest):
             "url": f"/temp/{filename}"
         }
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
+        logger.error(f"Upload failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/generate-report", response_model=ReportResponse)
@@ -469,7 +512,6 @@ def generate_report(req: ReportRequest):
             }
 
     except Exception as e:
-        import traceback
         traceback.print_exc()
         return {
             "success": False,
@@ -481,42 +523,63 @@ def generate_report(req: ReportRequest):
 @app.get("/api/vulnerabilities")
 def get_vulnerabilities():
     """获取所有漏洞列表及其详情"""
-    # 直接使用缓存中的详情列表
-    _, cached_vulns = get_cached_vulnerabilities()
-    return list(cached_vulns.values())
+    try:
+        # 显式重载缓存，避免数据不一致
+        _, cached_vulns = reload_vulnerabilities_cache()
+        if not cached_vulns:
+             return []
+        
+        # 将字典的值转换为列表返回
+        return list(cached_vulns.values())
+    except Exception as e:
+        logger.error(f"Error fetching vulnerabilities: {e}")
+        return []
 
 @app.post("/api/vulnerabilities")
 def add_vulnerability(vuln: CustomVulnRequest):
     """添加新漏洞"""
-    success, msg = get_db_reader().add_vulnerability_to_db(vuln.dict())
-    if not success:
-        raise HTTPException(status_code=400, detail=msg)
+    try:
+        success, msg = get_db_reader().add_vulnerability_to_db(vuln.dict())
+        if not success:
+            raise HTTPException(status_code=400, detail=msg)
     
-    reload_vulnerabilities_cache()
-    
-    return {"message": msg}
+        # 立即刷新缓存
+        reload_vulnerabilities_cache()
+        
+        return {"success": True, "message": msg}
+    except Exception as e:
+        logger.error(f"Add vulnerability failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.put("/api/vulnerabilities/{Vuln_id}")
 def update_vulnerability(Vuln_id: str, vuln: CustomVulnRequest):
     """更新漏洞信息"""
-    success, msg = get_db_reader().update_vulnerability_in_db(Vuln_id, vuln.dict())
-    if not success:
-        raise HTTPException(status_code=400, detail=msg)
+    try:
+        success, msg = get_db_reader().update_vulnerability_in_db(Vuln_id, vuln.dict())
+        if not success:
+            raise HTTPException(status_code=400, detail=msg)
 
-    reload_vulnerabilities_cache()
+        reload_vulnerabilities_cache()
 
-    return {"message": msg}
+        return {"success": True, "message": msg}
+    except Exception as e:
+        logger.error(f"Update vulnerability failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/vulnerabilities/{Vuln_id}")
 def delete_vulnerability(Vuln_id: str):
     """删除漏洞"""
-    success, msg = get_db_reader().delete_vulnerability_from_db(Vuln_id)
-    if not success:
-        raise HTTPException(status_code=400, detail=msg)
+    try:
+        success, msg = get_db_reader().delete_vulnerability_from_db(Vuln_id)
+        if not success:
+             raise HTTPException(status_code=400, detail=msg)
 
-    reload_vulnerabilities_cache()
+        reload_vulnerabilities_cache()
 
-    return {"message": msg}
+        return {"success": True, "message": msg}
+    except Exception as e:
+        logger.error(f"Delete vulnerability failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/open-folder")
 def open_folder(req: dict):
@@ -546,7 +609,6 @@ def open_folder(req: dict):
         if os.name == 'nt':
             os.startfile(target_dir)
         else:
-            import subprocess
             if sys.platform == 'darwin':
                 subprocess.Popen(['open', target_dir])
             else:
@@ -559,8 +621,6 @@ def open_folder(req: dict):
 def merge_reports(req: MergeRequest):
     """合并多个报告"""
     try:
-        from core.report_merger import ReportMerger
-        
         # 确定输出路径
         # 默认放到 output/report/合并报告 下
         MERGE_DIR = os.path.join(OUTPUT_DIR, "Combined")
@@ -830,7 +890,6 @@ def generate_template_report(template_id: str, data: Dict[str, Any]):
                 "errors": result.get("errors", [])
             }
     except Exception as e:
-        import traceback
         logger.error(f"Generate report error: {traceback.format_exc()}")
         return {
             "success": False,
@@ -863,8 +922,6 @@ def reload_templates():
     - 新增的 API 路由需要重启应用才能生效（FastAPI 限制）
     """
     try:
-        from core.base_handler import HandlerRegistry
-        
         # 记录重载前的 handler 数量
         handlers_before = set(HandlerRegistry.list_registered())
         
@@ -901,7 +958,6 @@ def reload_templates():
         }
     except Exception as e:
         logger.error(f"Failed to reload templates: {str(e)}")
-        import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to reload templates: {str(e)}")
 
@@ -945,10 +1001,6 @@ def check_template_dependencies(template_id: str):
 @app.get("/api/templates/{template_id}/export")
 def export_template(template_id: str):
     """导出模板为压缩包"""
-    import zipfile
-    import io
-    from fastapi.responses import StreamingResponse
-    
     template_dir = os.path.join(TEMPLATES_DIR, template_id)
     if not os.path.exists(template_dir):
         raise HTTPException(status_code=404, detail=f"Template not found: {template_id}")
@@ -979,11 +1031,6 @@ def export_template(template_id: str):
 @app.post("/api/templates/batch-export")
 def batch_export_templates(template_ids: List[str]):
     """批量导出多个模板为一个压缩包"""
-    import zipfile
-    import io
-    from fastapi.responses import StreamingResponse
-    from datetime import datetime
-    
     if not template_ids:
         raise HTTPException(status_code=400, detail="No template IDs provided")
     
@@ -1039,7 +1086,7 @@ def _detect_templates_in_zip(names: List[str]) -> List[str]:
 
 def _import_single_template(zf, template_id: str, all_names: List[str], overwrite: bool) -> Dict[str, Any]:
     """
-    从 ZIP 中导入单个模板
+    从 ZIP 中导入单个模板 (Security Hardened)
     """
     # 过滤出属于该模板的文件
     template_files = [n for n in all_names if n.startswith(f"{template_id}/")]
@@ -1061,9 +1108,42 @@ def _import_single_template(zf, template_id: str, all_names: List[str], overwrit
         backup_dir = f"{target_dir}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         shutil.move(target_dir, backup_dir)
     
-    # 解压该模板的文件
-    for file_name in template_files:
-        zf.extract(file_name, TEMPLATES_DIR)
+    # [Security Fix] Zip Slip 防御 & 安全解压
+    extracted_files = []
+    try:
+        for file_name in template_files:
+            # 1. 检查文件名是否包含路径遍历字符
+            if '..' in file_name or file_name.startswith('/') or '\\' in file_name:
+                raise ValueError(f"Malicious path detected: {file_name}")
+            
+            # 2. 规范化目标路径
+            target_path = os.path.join(TEMPLATES_DIR, file_name)
+            if not os.path.abspath(target_path).startswith(os.path.abspath(TEMPLATES_DIR)):
+                raise ValueError(f"Path traversal attempt: {file_name}")
+
+            # 3. 解压
+            zf.extract(file_name, TEMPLATES_DIR)
+            extracted_files.append(target_path)
+            
+            # 4. [Security Fix] 如果是 .py 文件，立即进行静态审计
+            # 如果解压了恶意代码，虽然还未加载，但留在磁盘上是隐患。
+            # 这里我们利用 TemplateManager 的审计功能进行 Pre-validation
+            if file_name.endswith('.py'):
+                try:
+                    # 临时实例化一个 TemplateManager 来借用其审计方法，或者直接调用静态方法
+                    # 这里直接调用实例的方法（因为 startup 时已初始化单例）
+                    tm = get_template_manager()
+                    tm.audit_code_security(template_id, target_path)
+                except Exception as audit_err:
+                    # 审计失败，回滚操作（删除已解压的文件）
+                    logger.error(f"Audit failed during import for {file_name}: {audit_err}")
+                    raise ValueError(f"Security Policy Violation: {str(audit_err)}")
+
+    except Exception as e:
+        # 发生错误，清理残局
+        if os.path.exists(target_dir):
+            shutil.rmtree(target_dir)
+        return {"success": False, "reason": str(e)}
     
     return {"success": True}
 
@@ -1077,9 +1157,6 @@ async def import_template(file: UploadFile = File(...), overwrite: bool = Form(d
     2. 多模板综合 ZIP（template1/..., template2/...）
     3. 通过多次调用导入多个文件
     """
-    import zipfile
-    import io
-    
     if not file.filename or not file.filename.endswith('.zip'):
         raise HTTPException(status_code=400, detail="Only ZIP files are supported")
     

@@ -50,8 +50,7 @@ window.AppFormRenderer = {
     
     async loadTemplateList(skipAutoLoad = false) {
         try {
-            const res = await fetch(window.AppAPI.BASE_URL + '/api/templates');
-            const data = await res.json();
+            const data = await AppAPI.Templates.list();
             if (this.templateSelector && data.templates) {
                 this.templateSelector.innerHTML = '';
                 data.templates.forEach(t => {
@@ -83,8 +82,7 @@ window.AppFormRenderer = {
             const currentTemplateId = this.currentTemplateId;
             
             // 调用后端热加载API
-            const res = await fetch(window.AppAPI.BASE_URL + '/api/templates/reload', { method: 'POST' });
-            const result = await res.json();
+            const result = await AppAPI.Templates.reload();
             
             if (result.success) {
                 // 清空缓存
@@ -132,19 +130,16 @@ window.AppFormRenderer = {
     async loadTemplate(templateId) {
         try {
             // 动态表单模板 - 完整加载和渲染
-            const schemaRes = await fetch(window.AppAPI.BASE_URL + '/api/templates/' + templateId + '/schema');
-            if (!schemaRes.ok) throw new Error('Template not found: ' + templateId);
-            const schema = await schemaRes.json();
+            const schema = await AppAPI.Templates.getSchema(templateId);
             
             // 使用缓存加载数据源
             const cacheKey = `datasource_${templateId}`;
             let dataSources = this.getCachedData(cacheKey);
             if (!dataSources) {
-                const dsRes = await fetch(window.AppAPI.BASE_URL + '/api/templates/' + templateId + '/data-sources');
-                if (dsRes.ok) {
-                    dataSources = await dsRes.json();
+                try {
+                    dataSources = await AppAPI.Templates.getDataSources(templateId);
                     this.setCachedData(cacheKey, dataSources);
-                }
+                } catch(e) { /* ignore datasource error */ }
             }
             this.dataSources = dataSources || {};
             
@@ -1676,10 +1671,7 @@ window.AppFormRenderer = {
         };
         
         try {
-            const res = await fetch(window.AppAPI.BASE_URL + '/api/templates/' + tid + '/generate', {
-                method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)
-            });
-            const result = await res.json();
+            const result = await AppAPI.Templates.generate(tid, data);
             restoreUI();
             
             if (result.success) {
@@ -1719,18 +1711,9 @@ window.AppFormRenderer = {
         };
         
         try {
-            const res = await fetch(`${window.AppAPI.BASE_URL}/api/vulnerabilities`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(vulnData)
-            });
-            if (res.ok) {
-                if (window.AppUtils) AppUtils.showToast("已添加到漏洞库", "success");
-                if (window.AppVulnManager) await AppVulnManager.loadVulnerabilities();
-            } else {
-                const r = await res.json();
-                if (window.AppUtils) AppUtils.showToast("添加失败: " + r.detail, "error");
-            }
+            const result = await AppAPI.saveVulnerability(vulnData);
+            if (window.AppUtils) AppUtils.showToast("已添加到漏洞库", "success");
+            if (window.AppVulnManager) await AppVulnManager.loadVulnerabilities();
         } catch(e) {
             if (window.AppUtils) AppUtils.showToast("添加出错: " + e.message, "error");
         }
@@ -1782,19 +1765,10 @@ window.AppFormRenderer = {
     // 打开报告目录
     openReportFolder() {
         if (window.lastReportPath) {
-            if (window.AppAPI && window.AppAPI.openFolder) {
-                window.AppAPI.openFolder(window.lastReportPath);
-            } else {
-                // 尝试通过 API 打开
-                fetch(`${window.AppAPI.BASE_URL}/api/open-folder`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ path: window.lastReportPath })
-                }).catch(e => {
-                    console.error('Open folder failed:', e);
-                    if (window.AppUtils) AppUtils.showToast('打开目录失败', 'error');
-                });
-            }
+            AppAPI.openFolder(window.lastReportPath).catch(e => {
+                console.error('Open folder failed:', e);
+                if (window.AppUtils) AppUtils.showToast('打开目录失败', 'error');
+            });
         } else {
             // 打开默认输出目录
             if (window.AppAPI && window.AppAPI.openFolder) {

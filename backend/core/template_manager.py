@@ -13,6 +13,7 @@ from datetime import datetime
 from functools import lru_cache
 import re
 from .logger import setup_logger
+
 from .exceptions import (
     TemplateNotFoundError,
     TemplateLoadError,
@@ -126,6 +127,8 @@ class FieldDefinition:
     editable_config: bool = False     # 是否可编辑配置
     save_to_config: bool = False      # 是否保存到配置
     presets: Dict = field(default_factory=dict)  # 预设值 (根据选择自动填充其他字段)
+    show_if: Dict = field(default_factory=dict)   # 条件显示逻辑 -> {field: "xxx", value: "yyy"}
+    transform: str = ""               # 数据转换规则 (例如 "uppercase", "json")
 
 
 @dataclass
@@ -258,32 +261,17 @@ class TemplateManager:
         Args:
             template_id: 模板ID (目录名)
             schema_path: schema.yaml 文件路径
-            
-        Raises:
-            InvalidTemplateIdError: 模板 ID 不符合命名规范
-            SchemaParseError: Schema 文件解析失败
-            TemplateLoadError: 模板加载失败
         """
         # 验证模板 ID 是否符合 Python 模块命名规范
         if not validate_template_id(template_id):
-            error = InvalidTemplateIdError(template_id)
-            logger.error(str(error))
+            logger.error(f"Invalid template ID format: {template_id}")
             return
         
         try:
             with open(schema_path, 'r', encoding='utf-8') as f:
                 schema = yaml.safe_load(f)
-        except FileNotFoundError:
-            error = SchemaParseError(template_id, schema_path, "File not found")
-            logger.error(str(error))
-            return
-        except yaml.YAMLError as e:
-            error = SchemaParseError(template_id, schema_path, f"YAML parse error: {str(e)}")
-            logger.error(str(error))
-            return
         except Exception as e:
-            error = SchemaParseError(template_id, schema_path, f"Unexpected error: {str(e)}")
-            logger.error(str(error))
+            logger.error(f"Failed to load schema for {template_id}: {e}")
             return
         
         try:
@@ -441,6 +429,56 @@ class TemplateManager:
             import traceback
             traceback.print_exc()
     
+    def audit_code_security(self, template_id: str, file_path: str):
+        """
+        [Security Fix] 静态审计代码安全性
+        检查 handler.py 是否包含禁止的导入或危险函数调用
+        """
+        import ast
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                tree = ast.parse(f.read())
+            
+            for node in ast.walk(tree):
+                # 检查 import
+                if isinstance(node, (ast.Import, ast.ImportFrom)):
+                    # 解析模块名
+                    module_name = ""
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            module_name = alias.name.split('.')[0]
+                            self._check_module_name(template_id, module_name)
+                    elif isinstance(node, ast.ImportFrom):
+                        if node.module:
+                            module_name = node.module.split('.')[0]
+                            self._check_module_name(template_id, module_name)
+
+                # 检查禁止的内置函数调用 (eval, exec, etc.)
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                    if node.func.id in {'eval', 'exec', 'compile', 'globals', 'locals'}:
+                         raise ValueError(f"Security Alert: Usage of forbidden function '{node.func.id}' in handler.py")
+
+        except Exception as e:
+            # 任何解析错误或安全违规都视为审计失败
+            logger.error(f"Code audit failed for {template_id}: {e}")
+            raise ValueError(f"Rejected malicious code: {str(e)}")
+
+    def _check_module_name(self, template_id: str, module_name: str):
+        """检查模块名是否在白名单中"""
+        # 放行 core.* 内部模块
+        if module_name == 'core': 
+            return
+            
+        if module_name not in self.ALLOWED_PACKAGES:
+             # 特殊处理子模块
+             if '.' in module_name:
+                 base_mod = module_name.split('.')[0]
+                 if base_mod in self.ALLOWED_PACKAGES:
+                     return
+             
+             raise ValueError(f"Security Alert: Import of unapproved module '{module_name}' is forbidden")
+
     def _load_handler(self, template_id: str, template_dir: str):
         """
         动态加载模板的 handler.py（阶段 1：任务 1.1）
@@ -458,6 +496,13 @@ class TemplateManager:
             logger.warning(f"Handler not found for template: {template_id}")
             return
         
+        # [Security Fix] 加载前先执行静态代码审计
+        try:
+            self.audit_code_security(template_id, handler_path)
+        except ValueError as e:
+            logger.critical(f"Security audit failed for {template_id}, loading blocked: {e}")
+            return # 阻止加载
+
         try:
             import importlib.util
             import sys
@@ -962,9 +1007,46 @@ class TemplateManager:
         
         return os.path.join(output_dir, filename)
     
+    # Security: 允许的依赖包白名单
+    ALLOWED_PACKAGES = {
+        # 标准库 (Standard Library)
+        'abc', 'argparse', 'ast', 'base64', 'code', 'collections', 'contextlib', 'copy', 
+        'csv', 'ctypes', 'dataclasses', 'datetime', 'email', 'enum', 'errno', 'fcntl', 
+        'filecmp', 'fnmatch', 'functools', 'glob', 'hashlib', 'importlib', 'io', 'itertools', 
+        'json', 'locale', 'logging', 'math', 'multiprocessing', 'operator', 'os', 'pathlib', 
+        'pickle', 'platform', 'plistlib', 'pprint', 'random', 're', 'shlex', 'shutil', 
+        'signal', 'socket', 'sqlite3', 'stat', 'string', 'struct', 'subprocess', 'sys', 
+        'sysconfig', 'tempfile', 'textwrap', 'threading', 'time', 'traceback', 'typing', 
+        'unittest', 'urllib', 'uuid', 'warnings', 'weakref', 'xml', 'zipfile',
+
+        # 第三方库 (Third Party)
+        'requests',            # HTTP 请求
+        'pandas',              # 数据处理
+        'numpy',               # 数值计算
+        'openpyxl',            # Excel 处理
+        'python-docx', 'docx', # Word 处理
+        'docxcompose',         # Word 合并
+        'pillow', 'PIL',       # 图片处理
+        'lxml',                # XML/HTML 解析
+        'pyyaml', 'yaml',      # YAML 解析
+        'beautifulsoup4', 'bs4', # 网页解析
+        'matplotlib',          # 图表绘制
+        'tldextract',          # 域名解析
+        'uvicorn',             # ASGI 服务器
+        'fastapi',             # Web 框架
+        'pydantic',            # 数据验证
+        'packaging',           # 版本处理
+        'PyInstaller',         # 打包工具
+
+        # 常用底层依赖
+        'urllib3', 'certifi', 'idna', 'charset-normalizer', 'six',
+        'python-dateutil', 'pytz', 'typing-extensions', 'click', 'colorama'
+    }
+
     def check_dependencies(self, template_id: str, raise_on_missing: bool = False) -> Tuple[bool, List[str]]:
         """
         检查模板依赖是否满足（解决问题 9：模板依赖管理缺失）
+        Security Fix: 增加依赖白名单检查，防止恶意依赖引入
         
         Args:
             template_id: 模板ID
@@ -1000,10 +1082,19 @@ class TemplateManager:
             
             missing = []
             for dep in dependencies:
+                # 格式解析：requests>=2.28.0 -> requests
+                pkg_name = dep.split('>=')[0].split('==')[0].split('<')[0].split('[')[0].strip().lower()
+                
+                # Security Check: 白名单验证
+                if pkg_name not in self.ALLOWED_PACKAGES:
+                    logger.warning(f"Security Alert: Template {template_id} requests unapproved dependency '{pkg_name}'")
+                    if raise_on_missing:
+                         raise DependencyError(template_id, [f"Unapproved dependency: {pkg_name}"])
+                    missing.append(f"{dep} (Unapproved)")
+                    continue
+
                 try:
                     # 简单检查：尝试导入包名
-                    # 支持格式：requests>=2.28.0, pandas==1.5.0, pillow
-                    pkg_name = dep.split('>=')[0].split('==')[0].split('<')[0].strip()
                     __import__(pkg_name)
                 except ImportError:
                     missing.append(dep)

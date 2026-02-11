@@ -87,15 +87,8 @@ window.AppImage = {
             const reader = new FileReader();
             reader.onload = async (e) => {
                 try {
-                    const res = await fetch(`${window.AppAPI.BASE_URL}/api/upload-image`, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            image_base64: e.target.result,
-                            filename: originalFile ? originalFile.name : `screenshot_${Date.now()}.png`
-                        })
-                    });
-                    const data = await res.json();
+                    const filename = originalFile ? originalFile.name : `screenshot_${Date.now()}.png`;
+                    const data = await window.AppAPI.uploadImage(e.target.result, filename);
                     resolve(data.file_path ? data : null);
                 } catch (err) {
                     AppUtils.showToast("上传失败: " + err.message, "error");
