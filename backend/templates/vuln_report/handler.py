@@ -6,16 +6,16 @@
 
 import os
 import sys
-import sqlite3
+import re
+import traceback
 from typing import Dict, Any, List, Tuple
 from datetime import datetime
-
-# 添加 core 目录到路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'core'))
 
 from core.base_handler import BaseTemplateHandler, register_handler
 from core.template_manager import TemplateManager
 from core.logger import setup_logger
+from core.document_editor import DocumentEditor
+from core.document_image_processor import DocumentImageProcessor
 
 # 初始化日志记录器
 logger = setup_logger('VulnReportHandler')
@@ -124,7 +124,6 @@ class VulnReportHandler(BaseTemplateHandler):
     
     def _is_ip(self, text: str) -> bool:
         """检查是否为 IP 地址"""
-        import re
         ip_pattern = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
         return bool(re.match(ip_pattern, text.strip()))
     
@@ -135,10 +134,6 @@ class VulnReportHandler(BaseTemplateHandler):
         self.output_dir = output_dir
         
         try:
-            # 延迟导入，避免循环依赖
-            from core.document_editor import DocumentEditor
-            from core.document_image_processor import DocumentImageProcessor
-            
             # 1. 加载文档
             doc = self.load_document()
             if not doc:
@@ -200,7 +195,6 @@ class VulnReportHandler(BaseTemplateHandler):
             return True, final_path, "报告生成成功"
             
         except Exception as e:
-            import traceback
             traceback.print_exc()
             return False, "", f"报告生成失败: {str(e)}"
     
@@ -220,7 +214,6 @@ class VulnReportHandler(BaseTemplateHandler):
         filename = f"【{region}】【{hazard_type}】{report_name}【{hazard_level}】.docx"
         
         # 清理非法字符
-        import re
         filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
         
         return os.path.join(company_dir, filename)

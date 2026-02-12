@@ -8,39 +8,177 @@ window.AppAPI = {
             || "http://127.0.0.1:8000";
     },
 
-    // 初始化检查
-    async checkConnection() {
+    async _request(endpoint, method = 'GET', body = null) {
+        const options = {
+            method,
+            headers: {}
+        };
+        if (body) {
+            if (body instanceof FormData) {
+                options.body = body;
+            } else {
+                options.headers['Content-Type'] = 'application/json';
+                options.body = JSON.stringify(body);
+            }
+        }
+        
         try {
-            const res = await fetch(`${this.BASE_URL}/api/config`);
-            if (!res.ok) throw new Error("API not ready");
+            const res = await fetch(`${this.BASE_URL}${endpoint}`, options);
+            if (!res.ok) {
+                const errorData = await res.json().catch(() => ({}));
+                throw new Error(errorData.detail || errorData.message || `API Error: ${res.status}`);
+            }
             return await res.json();
         } catch (e) {
             throw e;
         }
     },
 
+    // --- Core ---
+
+    // 初始化检查
+    async checkConnection() {
+        return this._request('/api/config');
+    },
+
+    async getConfig() {
+        return this._request('/api/config');
+    },
+    
+    async updateConfig(data) {
+        return this._request('/api/update-config', 'POST', data);
+    },
+
     // URL 处理
     async processUrl(url) {
-        const res = await fetch(`${this.BASE_URL}/api/process-url`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({url})
-        });
-        return await res.json();
+        return this._request('/api/process-url', 'POST', { url });
     },
 
     // 打开文件夹
     async openFolder(path) {
-        return await fetch(`${this.BASE_URL}/api/open-folder`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ path })
-        }).then(r => r.json());
+        return this._request('/api/open-folder', 'POST', { path });
     },
 
-    // 漏洞列表
+    async uploadImage(base64Data, filename) {
+        return this._request('/api/upload-image', 'POST', { 
+            image_base64: base64Data, 
+            filename 
+        });
+    },
+
+    async backupDatabase() {
+        // Blob downloading is special, so we might need custom logic or just window.open
+        window.open(`${this.BASE_URL}/api/backup-db`);
+    },
+
+    // --- Vulnerabilities ---
+
     async getVulnerabilities() {
-        const res = await fetch(`${this.BASE_URL}/api/vulnerabilities`);
-        return await res.json();
+        return this._request('/api/vulnerabilities');
+    },
+
+    async saveVulnerability(data) {
+        // Decide create or update based on logic or pass ID separately
+        // But backend uses PUT for update by ID and POST for create
+        // Helper to check if it's an update probably needs ID
+        // For simplicity let the caller decide or auto-detect
+        return this._request('/api/vulnerabilities', 'POST', data);
+    },
+
+    async updateVulnerability(id, data) {
+         return this._request(`/api/vulnerabilities/${encodeURIComponent(id)}`, 'PUT', data);
+    },
+
+    async deleteVulnerability(id) {
+        return this._request(`/api/vulnerabilities/${encodeURIComponent(id)}`, 'DELETE');
+    },
+
+    // --- Templates ---
+    
+    Templates: {
+        async list(includeDetails = false) {
+            return window.AppAPI._request(`/api/templates?include_details=${includeDetails}`);
+        },
+        
+        async getSchema(id) {
+            return window.AppAPI._request(`/api/templates/${id}/schema`);
+        },
+        
+        async getDataSources(id) {
+            return window.AppAPI._request(`/api/templates/${id}/data-sources`);
+        },
+        
+        async reload() {
+            return window.AppAPI._request('/api/templates/reload', 'POST');
+        },
+        
+        async generate(id, data) {
+            return window.AppAPI._request(`/api/templates/${id}/generate`, 'POST', data);
+        },
+        
+        async import(file, overwrite = false) {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('overwrite', overwrite);
+            return window.AppAPI._request('/api/templates/import', 'POST', formData);
+        },
+        
+        async batchImport(files, overwrite = false) {
+            const formData = new FormData();
+            for(let i=0; i<files.length; i++) {
+                formData.append('files', files[i]);
+            }
+            formData.append('overwrite', overwrite);
+            return window.AppAPI._request('/api/templates/batch-import', 'POST', formData);
+        },
+        
+        // Export is a download, usually via GET
+        exportUrl(id) {
+            return `${window.AppAPI.BASE_URL}/api/templates/${id}/export`;
+        },
+        
+        async delete(id) {
+             return window.AppAPI._request(`/api/templates/${id}`, 'DELETE');
+        }
+    },
+
+    // --- Reports ---
+
+    Reports: {
+        async list() {
+            return window.AppAPI._request('/api/list-reports', 'POST'); 
+        },
+        
+        async delete(path) {
+            return window.AppAPI._request('/api/delete-report', 'POST', { path });
+        },
+        
+        async merge(files, filename) {
+             return window.AppAPI._request('/api/merge-reports', 'POST', { files, output_filename: filename });
+        }
+    },
+    
+    // --- ICP ---
+    
+    Icp: {
+        async list() {
+            return window.AppAPI._request('/api/icp-list');
+        },
+        
+        async add(data) {
+             return window.AppAPI._request('/api/icp-entry', 'POST', data);
+        },
+        
+        async update(id, data) {
+             return window.AppAPI._request(`/api/icp-entry/${id}`, 'PUT', data);
+        },
+        
+        async delete(id) {
+             return window.AppAPI._request(`/api/icp-entry/${id}`, 'DELETE');
+        },
+        
+        async batchDelete(ids) {
+             return window.AppAPI._request('/api/icp-batch-delete', 'POST', { ids });
+        }
     }
 };

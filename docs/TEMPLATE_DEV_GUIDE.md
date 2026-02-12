@@ -164,6 +164,54 @@ curl -X POST http://localhost:8000/api/templates/reload
 
 > **注意**：如果添加了自定义 API 路由，需要重启应用才能生效。仅修改 Handler 逻辑或 Schema 支持热加载。
 
+#### 6️⃣ 依赖声明与安全约束
+
+在 `schema.yaml` 中声明 Python 依赖：
+
+```yaml
+dependencies:
+  - "requests"
+  - "pandas"
+```
+
+**⚠️ 安全警告：**
+自 v1.2.0 起，系统启用了严格的依赖白名单机制。
+**允许的库 (Allowed Packages)**: 
+截至目前，系统白名单包括但不限于：
+  - `requests` (HTTP请求)
+  - `pandas`, `numpy` (数据处理)
+  - `openpyxl` (Excel处理)
+  - `python-docx` (Word处理)
+  - `pillow` (图片处理)
+  - `lxml`, `beautifulsoup4` (XML/HTML解析)
+  - `pyyaml` (YAML解析)
+  - `matplotlib` (图表绘制)
+  - `urllib3`, `certifi`, `idna`, `charset-normalizer`, `six`, `python-dateutil`, `pytz`, `typing-extensions` (基础依赖)
+
+*如需增加白名单，请更新 `backend/core/template_manager.py` 中的 `ALLOWED_PACKAGES` 集合，然后由您重新打包发布主程序。*
+
+**禁止的行为**:
+  - 禁止声明未授权的第三方包
+  - 禁止在模板中进行文件系统写入操作（除临时目录外）
+  - 禁止启动子进程或执行 shell 命令
+
+#### 7️⃣ 路由注册规范
+
+如果您的模板需要自定义 API，请在 `handler.py` 中定义 `APIRouter`：
+
+```python
+from fastapi import APIRouter
+
+# 系统会自动将其挂载到 /api/plugin/{template_id}/my-action
+router = APIRouter()
+
+@router.get("/my-action")
+def my_action():
+    return {"status": "ok"}
+```
+
+**注意**: 无需手动添加 `prefix`，系统会在加载时自动加上隔离前缀 `/api/plugin/{template_id}`。
+
 ---
 
 ## Schema 规范

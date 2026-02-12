@@ -48,11 +48,10 @@ root/
   │     ├─ api.js              # API 交互模块
   │     ├─ utils.js            # 通用工具函数
   │     ├─ main.js             # 主逻辑入口
-  │     ├─ form-renderer.js    # 动态表单渲染器
-  │     ├─ template-manager.js # 模板管理器（前端）
-  │     ├─ image-handler.js    # 图片上传与预览
-  │     ├─ vuln-manager.js     # 漏洞库管理
-  │     └─ toolbox.js          # 工具箱（报告合并、配置管理等）
+  ├─ docs/                     # 项目文档
+  │  ├─ DEPLOYMENT_GUIDE.md    # 部署指南
+  │  ├─ TEMPLATE_DEV_GUIDE.md  # 模板开发指南
+  │  └─ TEMPLATE_QUICK_START.md# 快速入门
   ├─ main.js                   # Electron 主进程入口
   ├─ preload.js                # Electron 预加载脚本
   ├─ package.json              # Node.js 项目配置
@@ -64,11 +63,16 @@ root/
 
 ## 功能特性
 
-### 1. 动态模板系统
+### 1. 动态模板系统 (安全加固版)
 - **插件化架构**：每个模板完全独立（Schema + Handler），支持热插拔
 - **动态加载**：放入新模板文件夹即可自动识别，无需重启
+- **安全沙箱机制**：
+  - **依赖白名单**：严格控制模板可调用的 Python 库，防止供应链攻击
+  - **路由隔离**：模板 API 强制挂载于独立命名空间 `/api/plugin/{id}/`
+  - **路径防御**：增强的路径遍历检查，防止文件越权访问
+  - **代码加载防护**：基于安全规范的 Handler 动态加载机制
 - **热加载支持**：修改模板逻辑后调用接口即可即时生效
-- **依赖管理**：模板可声明 Python 包依赖，系统自动检查
+- **依赖管理**：模板可声明 Python 包依赖，系统自动检查并拦截未授权依赖
 - **自定义路由**：模板可定义专属 API 接口（Router）
 - **动态表单**：根据 schema.yaml 自动生成前端表单
 

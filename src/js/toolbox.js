@@ -315,37 +315,12 @@ window.AppToolbox = {
 
     async downloadBackup() {
         try {
-            AppUtils.showToast("正在准备备份文件...", "info");
-            const res = await fetch(`${window.AppAPI.BASE_URL}/api/backup-db`);
-            if (res.ok) {
-                const blob = await res.blob();
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                
-                // Get filename from header or gen locally
-                let filename = `ReportGenX_Backup_${AppUtils.generateId()}.db`;
-                const disposition = res.headers.get('content-disposition');
-                if (disposition && disposition.indexOf('attachment') !== -1) {
-                    const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
-                    const matches = filenameRegex.exec(disposition);
-                    if (matches != null && matches[1]) { 
-                        filename = matches[1].replace(/['"]/g, '');
-                    }
-                }
-                
-                a.download = filename;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-                AppUtils.showToast("开始下载...", "success");
-            } else {
-                AppUtils.showToast("备份失败 (Server Error)", "error");
-            }
+            AppUtils.showToast("正在下载备份...", "info");
+            // 使用新API直接打开下载链接
+            window.AppAPI.backupDatabase();
         } catch(e) {
             console.error(e);
-            AppUtils.showToast("网络请求失败", "error");
+            AppUtils.showToast("操作失败", "error");
         }
     },
 
@@ -358,10 +333,7 @@ window.AppToolbox = {
         container.innerHTML = '<div style="padding:20px; color:#666;">加载中...</div>';
         
         try {
-            // Fetch Data only (Columns are fixed per requirement)
-            const resData = await fetch(`${window.AppAPI.BASE_URL}/api/icp-list`);
-            this.ICP_LIST = await resData.json();
-
+            this.ICP_LIST = await window.AppAPI.Icp.list();
             this.renderIcpList();
         } catch(e) {
             container.innerHTML = `<div style="color:red; padding:20px;">加载失败: ${e.message}</div>`;
@@ -554,10 +526,8 @@ window.AppToolbox = {
 
     async deleteIcpEntry(vulnId) {
         try {
-            const res = await fetch(`${window.AppAPI.BASE_URL}/api/icp-entry/${encodeURIComponent(vulnId)}`, {
-                method: 'DELETE'
-            });
-            if(res.ok) {
+            const result = await window.AppAPI.Icp.delete(vulnId);
+            if(result.success) {
                 AppUtils.showToast("已删除", "success");
                 // Local update
                 this.ICP_LIST = this.ICP_LIST.filter(i => i.Vuln_id !== vulnId);
@@ -610,17 +580,13 @@ window.AppToolbox = {
             updateRecordTime: document.getElementById('icp-updateTime').value
         };
 
-        const isEdit = !!id;
-        const url = isEdit ? `${window.AppAPI.BASE_URL}/api/icp-entry/${id}` : `${window.AppAPI.BASE_URL}/api/icp-entry`;
-        const method = isEdit ? 'PUT' : 'POST';
-
         try {
-            const res = await fetch(url, {
-                method: method,
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
-            });
-            const result = await res.json();
+            let result;
+            if (id) {
+                result = await window.AppAPI.Icp.update(id, data);
+            } else {
+                result = await window.AppAPI.Icp.add(data);
+            }
             
             if(result.success) {
                 AppUtils.showToast("保存成功", "success");
@@ -638,12 +604,7 @@ window.AppToolbox = {
         if(this.ICP_SELECTED_IDS.length === 0) return;
         if(await AppUtils.safeConfirm(`确认删除选中的 ${this.ICP_SELECTED_IDS.length} 条记录吗？`)) {
             try {
-                const res = await fetch(`${window.AppAPI.BASE_URL}/api/icp-batch-delete`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ ids: this.ICP_SELECTED_IDS })
-                });
-                const result = await res.json();
+                const result = await window.AppAPI.Icp.batchDelete(this.ICP_SELECTED_IDS);
                 if(result.success) {
                     AppUtils.showToast(result.message, "success");
                     this.ICP_SELECTED_IDS = []; // clear selection

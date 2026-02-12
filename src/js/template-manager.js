@@ -339,7 +339,7 @@ window.AppTemplateManager = {
         try {
             if (window.AppUtils) AppUtils.showToast('正在导出模板...', 'info');
             
-            const url = window.AppAPI.BASE_URL + '/api/templates/' + templateId + '/export';
+            const url = window.AppAPI.Templates.exportUrl(templateId);
             const a = document.createElement('a');
             a.href = url;
             a.download = templateId + '.zip';
@@ -359,16 +359,7 @@ window.AppTemplateManager = {
             const confirmed = await AppUtils.safeConfirm(`确定要删除模板 "${templateName}" 吗？\n\n此操作不可恢复！`);
             if (!confirmed) return;
             
-            const res = await fetch(window.AppAPI.BASE_URL + '/api/templates/' + templateId, {
-                method: 'DELETE'
-            });
-            
-            if (!res.ok) {
-                const error = await res.json();
-                throw new Error(error.detail || '删除失败');
-            }
-            
-            const result = await res.json();
+            const result = await window.AppAPI.Templates.delete(templateId);
             
             if (result.success) {
                 if (window.AppUtils) AppUtils.showToast('模板已删除', 'success');
@@ -399,8 +390,7 @@ window.AppTemplateManager = {
         
         try {
             // 获取完整的模板详情（包括字段信息）
-            const res = await fetch(window.AppAPI.BASE_URL + '/api/templates/' + template.id + '/schema');
-            const schema = await res.json();
+            const schema = await window.AppAPI.Templates.getSchema(template.id);
             
             // 渲染详情内容
             this.renderTemplateDetail(template, schema);
@@ -576,16 +566,7 @@ window.AppTemplateManager = {
                 AppUtils.showToast('正在导入模板...', 'info');
             }
             
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('overwrite', 'false');
-            
-            const response = await fetch(window.AppAPI.BASE_URL + '/api/templates/import', {
-                method: 'POST',
-                body: formData
-            });
-            
-            const result = await response.json();
+            const result = await window.AppAPI.Templates.import(file, false);
             
             if (result.success) {
                 const count = result.imported ? result.imported.length : 1;
@@ -612,18 +593,7 @@ window.AppTemplateManager = {
                 AppUtils.showToast(`正在导入 ${files.length} 个文件...`, 'info');
             }
             
-            const formData = new FormData();
-            for (let file of files) {
-                formData.append('files', file);
-            }
-            formData.append('overwrite', 'false');
-            
-            const response = await fetch(window.AppAPI.BASE_URL + '/api/templates/batch-import', {
-                method: 'POST',
-                body: formData
-            });
-            
-            const result = await response.json();
+            const result = await window.AppAPI.Templates.batchImport(files, false);
             
             if (result.success) {
                 if (window.AppUtils) {
@@ -719,11 +689,9 @@ window.AppTemplateManager = {
             // 逐个删除选中的模板
             for (const templateId of this.selectedTemplateIds) {
                 try {
-                    const res = await fetch(window.AppAPI.BASE_URL + '/api/templates/' + templateId, {
-                        method: 'DELETE'
-                    });
+                    const result = await window.AppAPI.Templates.delete(templateId);
                     
-                    if (res.ok) {
+                    if (result.success) {
                         successCount++;
                     } else {
                         failCount++;
