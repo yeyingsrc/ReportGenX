@@ -90,10 +90,25 @@ window.AppAPI = {
     },
 
     async deleteVulnerability(id) {
-        return this._request(`/api/vulnerabilities/${encodeURIComponent(id)}`, 'DELETE');
+         return this._request(`/api/vulnerabilities/${encodeURIComponent(id)}`, 'DELETE');
+     },
+
+    // Vulnerabilities CRUD object for CRUDManager
+    Vulnerabilities: {
+        async save(data) {
+            if (data.id) {
+                return window.AppAPI.updateVulnerability(data.id, data);
+            } else {
+                return window.AppAPI.saveVulnerability(data);
+            }
+        },
+        
+        async delete(id) {
+            return window.AppAPI.deleteVulnerability(id);
+        }
     },
 
-    // --- Templates ---
+     // --- Templates ---
     
     Templates: {
         async list(includeDetails = false) {
@@ -137,6 +152,12 @@ window.AppAPI = {
             return `${window.AppAPI.BASE_URL}/api/templates/${id}/export`;
         },
         
+        async save(data) {
+            // Templates don't have a traditional save operation
+            // This is a placeholder for CRUDManager compatibility
+            return { message: '模板操作成功' };
+        },
+        
         async delete(id) {
              return window.AppAPI._request(`/api/templates/${id}`, 'DELETE');
         }
@@ -147,6 +168,12 @@ window.AppAPI = {
     Reports: {
         async list() {
             return window.AppAPI._request('/api/list-reports', 'POST'); 
+        },
+        
+        async save(data) {
+            // Reports don't have a traditional save operation
+            // This is a placeholder for CRUDManager compatibility
+            return { message: '报告操作成功' };
         },
         
         async delete(path) {
@@ -163,6 +190,14 @@ window.AppAPI = {
     Icp: {
         async list() {
             return window.AppAPI._request('/api/icp-list');
+        },
+        
+        async save(data) {
+            if (data.id) {
+                return window.AppAPI.Icp.update(data.id, data);
+            } else {
+                return window.AppAPI.Icp.add(data);
+            }
         },
         
         async add(data) {

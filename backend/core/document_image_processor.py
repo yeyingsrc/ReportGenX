@@ -16,6 +16,9 @@ from docx.shared import Inches
 from docx.text.paragraph import Paragraph
 from PIL import Image
 
+from .document_editor import DocumentEditor
+
+
 class DocumentImageProcessor:
     def __init__(self, doc, vuln_sections=None):
         self.doc = doc
@@ -34,27 +37,10 @@ class DocumentImageProcessor:
 
     def _clear_paragraph_indent(self, paragraph) -> None:
         """
-        【核心功能】清除段落的首行缩进和悬挂缩进。
-        解决表格内图片插入后位置偏移的问题。
+        清除段落的首行缩进和悬挂缩进。
+        委托给 DocumentEditor 的静态方法。
         """
-        try:
-            p = paragraph._element
-            pPr = p.get_or_add_pPr()
-            
-            # 移除旧的缩进设置
-            ind = pPr.find(qn('w:ind'))
-            if ind is not None:
-                pPr.remove(ind)
-                
-            # 强制设置为0
-            ind = OxmlElement('w:ind')
-            ind.set(qn('w:firstLine'), '0')
-            ind.set(qn('w:firstLineChars'), '0')
-            ind.set(qn('w:left'), '0')
-            ind.set(qn('w:hanging'), '0')
-            pPr.append(ind)
-        except Exception:
-            pass
+        DocumentEditor.clear_paragraph_indent(paragraph)
 
     def _insert_image_run(self, paragraph, img_path: str, max_width_inches: float = 6.0):
         """

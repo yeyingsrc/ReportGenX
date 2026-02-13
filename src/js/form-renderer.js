@@ -531,29 +531,25 @@ window.AppFormRenderer = {
         if (!vulnId) return;
         
         try {
-            const res = await fetch(`${window.AppAPI.BASE_URL}/api/vulnerability/${vulnId}`);
-            if (res.ok) {
-                const data = await res.json();
-                if (data && !data.error) {
-                    // 填充各个字段 (后端字段名: Vuln_Name, Vuln_Description, Repair_suggestions, Risk_Level)
-                    if (data.Vuln_Name) {
-                        this.setFieldValue('vul_name', data.Vuln_Name);
-                    }
-                    if (data.Vuln_Description) {
-                        this.setFieldValue('vul_description', data.Vuln_Description);
-                    }
-                    if (data.Repair_suggestions) {
-                        this.setFieldValue('vul_fix_suggestion', data.Repair_suggestions);
-                    }
-                    if (data.Risk_Level) {
-                        // Risk_Level 可能是 "高危", "中危" 等
-                        this.setFieldValue('hazard_level', data.Risk_Level);
-                    }
-                    if (data.Vuln_Hazards) {
-                        // 如果有漏洞危害字段
-                        this.setFieldValue('vul_hazard', data.Vuln_Hazards);
-                    }
-                    
+            const data = await AppAPI._request(`/api/vulnerability/${encodeURIComponent(vulnId)}`);
+            if (data && !data.error) {
+                // 填充各个字段 (后端字段名: Vuln_Name, Vuln_Description, Repair_suggestions, Risk_Level)
+                if (data.Vuln_Name) {
+                    this.setFieldValue('vul_name', data.Vuln_Name);
+                }
+                if (data.Vuln_Description) {
+                    this.setFieldValue('vul_description', data.Vuln_Description);
+                }
+                if (data.Repair_suggestions) {
+                    this.setFieldValue('vul_fix_suggestion', data.Repair_suggestions);
+                }
+                if (data.Risk_Level) {
+                    // Risk_Level 可能是 "高危", "中危" 等
+                    this.setFieldValue('hazard_level', data.Risk_Level);
+                }
+                if (data.Vuln_Hazards) {
+                    // 如果有漏洞危害字段
+                    this.setFieldValue('vul_hazard', data.Vuln_Hazards);
                 }
             }
         } catch (e) {
@@ -660,15 +656,7 @@ window.AppFormRenderer = {
             const reader = new FileReader();
             reader.onload = async (e) => {
                 try {
-                    const res = await fetch(`${window.AppAPI.BASE_URL}/api/upload-image`, {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            image_base64: e.target.result,
-                            filename: file.name || `screenshot_${Date.now()}.png`
-                        })
-                    });
-                    const data = await res.json();
+                    const data = await AppAPI.uploadImage(e.target.result, file.name || `screenshot_${Date.now()}.png`);
                     resolve(data.file_path ? data : null);
                 } catch (err) {
                     if (window.AppUtils) AppUtils.showToast("上传失败: " + err.message, "error");
@@ -679,25 +667,23 @@ window.AppFormRenderer = {
         });
     },
     
-    // 添加图片项到预览
+    // 添加图片项到预览 - 使用 CSS 类替代内联样式
     addImageItem(field, imageInfo, container, multiple) {
         const fullUrl = `${window.AppAPI.BASE_URL}${imageInfo.url}`;
         const self = this;
         
         if (multiple) {
-            // 多图模式
+            // 多图模式 - 使用 CSS 类
             const wrapper = document.createElement('div');
             wrapper.className = 'evidence-item';
-            wrapper.style.cssText = "display:flex; gap:15px; margin-bottom:15px; padding:10px; background:#f9f9f9; border:1px solid #eee; align-items:start;";
             
             const imgBox = document.createElement('div');
             const img = document.createElement('img');
             img.src = fullUrl;
-            img.style.cssText = "max-width:200px; max-height:150px; border:1px solid #ccc; display:block; cursor: zoom-in;";
             imgBox.appendChild(img);
             
             const infoBox = document.createElement('div');
-            infoBox.style.cssText = "flex:1; display:flex; flex-direction:column;";
+            infoBox.className = 'evidence-info-box';
             
             const label = document.createElement('label');
             label.innerText = field.description_placeholder ? "图片说明:" : "图片说明/复现步骤:";
@@ -705,13 +691,15 @@ window.AppFormRenderer = {
             
             const textarea = document.createElement('textarea');
             textarea.rows = 4;
-            textarea.style.cssText = "width:100%; border:1px solid #ccc; padding:5px;";
+            textarea.className = 'evidence-textarea';
             textarea.placeholder = field.description_placeholder || "请输入此截图的说明文字...";
             
             const delBtn = document.createElement('button');
             delBtn.type = 'button';
             delBtn.innerText = "删除";
-            delBtn.style.cssText = "margin-top:25px; align-self:flex-start; background:#ff4d4f; color:white; border:none; padding:6px 12px; cursor:pointer; border-radius:4px;";
+            delBtn.className = 'btn-delete';
+            delBtn.style.marginTop = '25px';
+            delBtn.style.alignSelf = 'flex-start';
             
             // 创建数据对象
             const evidenceObj = { path: imageInfo.file_path, description: "" };
@@ -740,14 +728,14 @@ window.AppFormRenderer = {
             container.appendChild(wrapper);
             
         } else {
-            // 单图模式
+            // 单图模式 - 使用 CSS 类
             container.innerHTML = '';
             const thumbWrapper = document.createElement('div');
-            thumbWrapper.style.cssText = "display:inline-block; position:relative; margin-top:5px;";
+            thumbWrapper.className = 'thumb-wrapper';
             
             const img = document.createElement('img');
             img.src = fullUrl;
-            img.style.cssText = "height:120px; width:auto; border:1px solid #ccc; padding:2px; border-radius:4px; box-shadow:0 2px 4px rgba(0,0,0,0.1); cursor:zoom-in;";
+            img.className = 'thumb-img';
             img.onclick = () => this.openImagePreview(img.src, field.label || "图片预览");
             
             thumbWrapper.appendChild(img);
@@ -760,29 +748,27 @@ window.AppFormRenderer = {
         }
     },
     
-    // 确保预览模态框存在
+    // 确保预览模态框存在 - 使用 CSS 类替代内联样式
     ensurePreviewModal() {
         if (document.getElementById('form-image-preview-modal')) return;
         
         const modal = document.createElement('div');
         modal.id = 'form-image-preview-modal';
-        const modalZIndex = (window.AppConfig && window.AppConfig.Z_INDEX && window.AppConfig.Z_INDEX.MODAL) || 2000;
-        modal.style.cssText = `display: none; position: fixed; z-index: ${modalZIndex}; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.85); align-items: center; justify-content: center; flex-direction: column; opacity: 0; transition: opacity 0.3s ease;`;
+        modal.className = 'image-preview-modal';
         
         modal.onclick = (e) => {
             if (e.target === modal) this.closeImagePreview();
         };
 
         const img = document.createElement('img');
-        img.style.cssText = "max-width: 90%; max-height: 85vh; border: 2px solid #fff; box-shadow: 0 0 20px rgba(0,0,0,0.5); object-fit: contain; transform: scale(0.9); transition: transform 0.3s ease;";
         
         const closeBtn = document.createElement('span');
         closeBtn.innerHTML = "&times;";
-        closeBtn.style.cssText = "position: absolute; top: 20px; right: 30px; font-size: 40px; color: #fff; cursor: pointer; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.5);";
+        closeBtn.className = 'image-preview-close';
         closeBtn.onclick = () => this.closeImagePreview();
         
         const caption = document.createElement('div');
-        caption.style.cssText = "margin-top: 15px; color: #fff; font-size: 16px; max-width: 80%; text-align: center; text-shadow: 0 1px 2px rgba(0,0,0,0.8);";
+        caption.className = 'image-preview-caption';
 
         modal.appendChild(closeBtn);
         modal.appendChild(img);
@@ -794,35 +780,23 @@ window.AppFormRenderer = {
         const modal = document.getElementById('form-image-preview-modal');
         if (!modal) return;
         const img = modal.querySelector('img');
-        const cap = modal.querySelector('div:last-child');
+        const cap = modal.querySelector('.image-preview-caption');
         
         img.src = src;
         cap.innerText = text || "";
-        modal.style.display = 'flex';
-        modal.offsetHeight; // force reflow
-        modal.style.opacity = '1';
-        img.style.transform = 'scale(1)';
+        modal.classList.add('show');
     },
     
     closeImagePreview() {
         const modal = document.getElementById('form-image-preview-modal');
         if (!modal) return;
-        modal.style.opacity = '0';
-        setTimeout(() => modal.style.display = 'none', 300);
+        modal.classList.remove('show');
     },
     
     // 处理 URL 自动解析（ICP 查询）
     async handleUrlProcess(url) {
         try {
-            const res = await fetch(window.AppAPI.BASE_URL + '/api/process-url', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: url })
-            });
-            
-            if (!res.ok) return;
-            
-            const data = await res.json();
+            const data = await AppAPI.processUrl(url);
             
             // 填充解析结果
             if (data.ip) this.setFieldValue('ip', data.ip);
@@ -925,9 +899,8 @@ window.AppFormRenderer = {
             } else if (a.type === 'api_call' && a.endpoint) {
                 try {
                     let ep = a.endpoint.replace(/\${(\w+)}/g, (_, k) => this.formData[k] || '');
-                    const res = await fetch(window.AppAPI.BASE_URL + ep);
-                    if (res.ok && a.result_mapping) {
-                        const data = await res.json();
+                    const data = await AppAPI._request(ep);
+                    if (a.result_mapping) {
                         Object.entries(a.result_mapping).forEach(([src, tgt]) => {
                             const v = src.split('.').reduce((o, p) => o && o[p], data);
                             if (v != null) this.setFieldValue(tgt, v);
@@ -1588,6 +1561,20 @@ window.AppFormRenderer = {
                     }
                 }
             }
+            
+            // 漏洞列表验证：检查是否有空的漏洞条目
+            if (f.type === 'vuln_list' && data[f.key] && Array.isArray(data[f.key]) && data[f.key].length > 0) {
+                const emptyVulns = [];
+                data[f.key].forEach((vuln, idx) => {
+                    // 检查漏洞名称是否为空
+                    if (!vuln.vuln_name || !vuln.vuln_name.trim()) {
+                        emptyVulns.push(idx + 1);
+                    }
+                });
+                if (emptyVulns.length > 0) {
+                    errors.push(`漏洞 ${emptyVulns.join('、')} 未填写漏洞名称，请填写或删除空条目`);
+                }
+            }
         });
         return {valid: errors.length === 0, errors};
     },
@@ -1728,18 +1715,74 @@ window.AppFormRenderer = {
         if (this.currentSchema) {
             this.currentSchema.fields.forEach(f => {
                 const el = document.getElementById(f.key);
-                if (el) {
-                    if (f.type === 'image' || f.type === 'image_list') {
-                        // 清空图片预览
-                        const preview = document.getElementById(`${f.key}-preview`);
-                        if (preview) preview.innerHTML = '';
-                        // 重置图片数据
-                        if (f.type === 'image_list') {
-                            this.formData[f.key] = [];
-                        } else {
-                            this.formData[f.key] = '';
+                
+                // 处理复杂字段类型
+                if (f.type === 'target_list' || f.type === 'tester_info_list') {
+                    // 清空列表数据
+                    this.formData[f.key] = [];
+                    // 清空表格内容（保留表头）
+                    if (el) {
+                        const tbody = el.querySelector('tbody');
+                        if (tbody) tbody.innerHTML = '';
+                    }
+                } else if (f.type === 'vuln_list') {
+                    // 清空漏洞列表数据
+                    this.formData[f.key] = [];
+                    // 清空侧边栏和内容区（使用正确的 ID 后缀）
+                    const sidebarList = document.getElementById(`${f.key}_sidebar_list`);
+                    const mainContent = document.getElementById(`${f.key}_list`);
+                    const emptyTip = document.getElementById(`${f.key}_empty`);
+                    
+                    if (sidebarList) sidebarList.innerHTML = '';
+                    if (mainContent) {
+                        // 清空所有漏洞卡片，只保留空提示
+                        const cards = mainContent.querySelectorAll('.vuln-item-card');
+                        cards.forEach(card => card.remove());
+                    }
+                    // 显示空提示
+                    if (emptyTip) emptyTip.style.display = 'block';
+                } else if (f.type === 'checkbox_group') {
+                    // 清空复选框组数据
+                    this.formData[f.key] = [];
+                    // 取消所有复选框选中状态
+                    if (el) {
+                        const checkboxes = el.querySelectorAll('input[type="checkbox"]');
+                        checkboxes.forEach(cb => cb.checked = false);
+                        // 清空关联的文本框
+                        const textarea = el.querySelector('textarea');
+                        if (textarea) textarea.value = '';
+                    }
+                } else if (f.type === 'checkbox') {
+                    // 单个复选框
+                    if (el && el.type === 'checkbox') {
+                        el.checked = false;
+                    }
+                } else if (f.type === 'searchable_select') {
+                    // 可搜索下拉框：清空搜索框和重置下拉框
+                    if (el) {
+                        const searchInput = el.querySelector('input[type="text"]');
+                        const select = el.querySelector('select');
+                        if (searchInput) searchInput.value = '';
+                        if (select) {
+                            select.selectedIndex = 0;
+                            // 触发 input 事件以恢复所有选项
+                            if (searchInput) {
+                                searchInput.dispatchEvent(new Event('input'));
+                            }
                         }
-                    } else if (el.tagName === 'SELECT') {
+                    }
+                } else if (f.type === 'image' || f.type === 'image_list') {
+                    // 清空图片预览
+                    const preview = document.getElementById(`${f.key}-preview`);
+                    if (preview) preview.innerHTML = '';
+                    // 重置图片数据
+                    if (f.type === 'image_list') {
+                        this.formData[f.key] = [];
+                    } else {
+                        this.formData[f.key] = '';
+                    }
+                } else if (el) {
+                    if (el.tagName === 'SELECT') {
                         el.selectedIndex = 0;
                     } else if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
                         el.value = '';
@@ -1771,18 +1814,10 @@ window.AppFormRenderer = {
             });
         } else {
             // 打开默认输出目录
-            if (window.AppAPI && window.AppAPI.openFolder) {
-                window.AppAPI.openFolder('output/report');
-            } else {
-                fetch(`${window.AppAPI.BASE_URL}/api/open-folder`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ path: 'output/report' })
-                }).catch(e => {
-                    console.error('Open folder failed:', e);
-                    if (window.AppUtils) AppUtils.showToast('打开目录失败', 'error');
-                });
-            }
+            window.AppAPI.openFolder('output/report').catch(e => {
+                console.error('Open folder failed:', e);
+                if (window.AppUtils) AppUtils.showToast('打开目录失败', 'error');
+            });
         }
     },
     
@@ -1858,18 +1893,7 @@ window.AppFormRenderer = {
             // 5. 上传并导入
             if (window.AppUtils) AppUtils.showToast('正在上传模板...', 'info');
             
-            const res = await fetch(window.AppAPI.BASE_URL + '/api/templates/import', {
-                method: 'POST',
-                body: formData
-            });
-            
-            // 6. 处理响应
-            if (!res.ok) {
-                const error = await res.json();
-                throw new Error(error.detail || error.message || '导入失败');
-            }
-            
-            const result = await res.json();
+            const result = await AppAPI.Templates.import(file, false);
             
             if (result.success) {
                 // 7. 导入成功
@@ -1934,11 +1958,7 @@ window.AppFormRenderer = {
             const confirmed = await AppUtils.safeConfirm(`确定要删除模板 "${tid}" 吗？此操作不可恢复！`);
             if (!confirmed) return;
             
-            const res = await fetch(window.AppAPI.BASE_URL + '/api/templates/' + tid, {
-                method: 'DELETE'
-            });
-            
-            const result = await res.json();
+            const result = await AppAPI.Templates.delete(tid);
             
             if (result.success) {
                 if (window.AppUtils) AppUtils.showToast('模板已删除', 'success');
@@ -2243,12 +2263,9 @@ window.AppFormRenderer = {
 
                 // 调用 API 获取完整的漏洞详情
                 try {
-                    const res = await fetch(`${window.AppAPI.BASE_URL}/api/vulnerability/${encodeURIComponent(vulnId)}`);
-                    if (res.ok) {
-                        const vData = await res.json();
-                        if (vData && !vData.error) {
-                            this.fillVulnItemFromLibrary(field, currentIdx, vulnData, vData);
-                        }
+                    const vData = await AppAPI._request(`/api/vulnerability/${encodeURIComponent(vulnId)}`);
+                    if (vData && !vData.error) {
+                        this.fillVulnItemFromLibrary(field, currentIdx, vulnData, vData);
                     }
                 } catch (err) {
                     console.error('[FormRenderer] Failed to fetch vulnerability details:', err);

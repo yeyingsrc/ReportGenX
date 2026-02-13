@@ -139,9 +139,14 @@ class DbDataReader:
         return ""
 
     def _clean_str(self, val):
-        """清理字符串，处理NaN和None"""
+        """清理字符串，处理NaN和None，以及浮点数整数化"""
         if val is None:
             return ""
+        # 如果是浮点数且实际上是整数值（如 1.0），转换为整数字符串
+        if isinstance(val, float):
+            if val.is_integer():
+                return str(int(val))
+            return str(val)
         s = str(val).strip()
         return "" if s.lower() == 'nan' else s
 
@@ -336,6 +341,11 @@ class DbDataReader:
 
     def get_table_columns(self, table_name):
         """获取表头字段"""
+        # Security: Validate table name
+        if not re.match(r'^[a-zA-Z0-9_]+$', table_name):
+            logger.error(f"Security check failed: Invalid table name '{table_name}'")
+            return []
+        
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()

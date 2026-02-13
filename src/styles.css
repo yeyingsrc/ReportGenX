@@ -1103,3 +1103,312 @@ textarea { resize: vertical; min-height: 100px; line-height: 1.5; }
     font-family: inherit;
 }
 
+/* ========== 通用组件样式 (提取自内联样式) ========== */
+
+/* 图片证据容器 */
+.evidence-item {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 15px;
+    padding: 10px;
+    background: #f9f9f9;
+    border: 1px solid #eee;
+    align-items: start;
+}
+
+.evidence-item img {
+    max-width: 200px;
+    max-height: 150px;
+    border: 1px solid #ccc;
+    display: block;
+    cursor: zoom-in;
+}
+
+.evidence-info-box {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.evidence-textarea {
+    width: 100%;
+    border: 1px solid #ccc;
+    padding: 5px;
+}
+
+/* 删除按钮样式 */
+.btn-delete {
+    background: #ff4d4f;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.btn-delete:hover {
+    background: #ff7875;
+}
+
+.btn-delete-small {
+    background: #ff4d4f;
+    color: white;
+    border: none;
+    padding: 4px 8px;
+    cursor: pointer;
+    border-radius: 3px;
+}
+
+/* 缩略图容器 */
+.thumb-wrapper {
+    display: inline-block;
+    position: relative;
+    margin-top: 5px;
+}
+
+.thumb-img {
+    height: 120px;
+    width: auto;
+    border: 1px solid #ccc;
+    padding: 2px;
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    cursor: zoom-in;
+}
+
+/* 图片预览模态框 */
+.image-preview-modal {
+    display: none;
+    position: fixed;
+    z-index: 2000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.85);
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.image-preview-modal.show {
+    display: flex;
+    opacity: 1;
+}
+
+.image-preview-modal img {
+    max-width: 90%;
+    max-height: 85vh;
+    border: 2px solid #fff;
+    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+    object-fit: contain;
+    transform: scale(0.9);
+    transition: transform 0.3s ease;
+}
+
+.image-preview-modal.show img {
+    transform: scale(1);
+}
+
+.image-preview-close {
+    position: absolute;
+    top: 20px;
+    right: 30px;
+    font-size: 40px;
+    color: #fff;
+    cursor: pointer;
+    font-weight: bold;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+}
+
+.image-preview-caption {
+    margin-top: 15px;
+    color: #fff;
+    font-size: 16px;
+    max-width: 80%;
+    text-align: center;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+}
+
+/* 表格通用样式 */
+.data-table-wrapper {
+    overflow-x: auto;
+    margin-bottom: 10px;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.data-table th {
+    padding: 8px;
+    border: 1px solid #ddd;
+    background: #f5f5f5;
+}
+
+.data-table td {
+    padding: 6px;
+    border: 1px solid #ddd;
+}
+
+.data-table td.center {
+    text-align: center;
+}
+
+.data-table input {
+    width: 100%;
+    padding: 6px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    box-sizing: border-box;
+}
+
+/* Flex 布局工具类 */
+.flex-row {
+    display: flex;
+    align-items: center;
+}
+
+.flex-col {
+    display: flex;
+    flex-direction: column;
+}
+
+.flex-between {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.flex-gap-8 { gap: 8px; }
+.flex-gap-10 { gap: 10px; }
+.flex-gap-15 { gap: 15px; }
+.flex-gap-20 { gap: 20px; }
+
+/* 间距工具类 */
+.mb-10 { margin-bottom: 10px; }
+.mb-15 { margin-bottom: 15px; }
+.mb-20 { margin-bottom: 20px; }
+
+/* 动态表单漏洞列表组件样式 (用于 form-renderer 中的漏洞列表字段) */
+.dynamic-vuln-list-container {
+    display: flex;
+    gap: 20px;
+    min-height: 400px;
+}
+
+.dynamic-vuln-sidebar {
+    width: 200px;
+    flex-shrink: 0;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    background: #fafafa;
+    padding: 10px;
+}
+
+.dynamic-vuln-sidebar-title {
+    font-weight: bold;
+    padding: 8px;
+    border-bottom: 1px solid #e0e0e0;
+    margin-bottom: 10px;
+}
+
+.dynamic-vuln-sidebar-item {
+    padding: 10px;
+    margin-bottom: 5px;
+    border-radius: 6px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+}
+
+.dynamic-vuln-sidebar-item:hover {
+    background: #f0f0f0;
+}
+
+.dynamic-vuln-sidebar-item.active {
+    background: #e6f7ff;
+    border-color: #1890ff;
+}
+
+.dynamic-vuln-main-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.dynamic-vuln-item-card {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 20px;
+    background: #fff;
+    display: none;
+}
+
+.dynamic-vuln-item-card.active {
+    display: block;
+}
+
+.dynamic-vuln-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+}
+
+.dynamic-vuln-index-badge {
+    background: var(--primary-color, #1890ff);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+.dynamic-vuln-empty-tip {
+    text-align: center;
+    padding: 60px 20px;
+    color: #999;
+    border: 2px dashed #e0e0e0;
+    border-radius: 8px;
+}
+
+/* 搜索选择器 */
+.searchable-select-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.searchable-select-container .search-input {
+    padding: 8px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+/* 上传区域 */
+.upload-area {
+    border: 2px dashed #ddd;
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    cursor: pointer;
+    background: #fff;
+    transition: border-color 0.2s, background 0.2s;
+}
+
+.upload-area:hover {
+    border-color: var(--primary-color);
+    background: #f8f9fa;
+}
+
+.upload-area .upload-icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+}
+
+

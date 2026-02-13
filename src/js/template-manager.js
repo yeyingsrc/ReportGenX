@@ -1,10 +1,12 @@
 // template-manager.js - 模板管理模块（工具箱中的模板列表展示和管理）
+// 重构版 - 使用CRUDManager
 
 window.AppTemplateManager = {
     templateList: [],
-    selectedTemplateIds: [], // 存储选中的模板ID
-    currentSearchTerm: '', // 当前搜索关键词
-    _eventsInitialized: false, // 防止重复绑定事件
+    selectedTemplateIds: [],
+    currentSearchTerm: '',
+    _eventsInitialized: false,
+    crud: null,  // CRUD管理器
     
     // 列定义常量
     COL_DEFS: [
@@ -23,6 +25,13 @@ window.AppTemplateManager = {
     },
     
     init() {
+        // 初始化CRUD管理器
+        this.crud = new CRUDManager(
+            window.AppAPI.Templates,
+            (items) => this.renderTemplateList(items, null),
+            () => window.AppAPI.Templates.list(true).then(data => data.templates || [])
+        );
+        
         if (!this._eventsInitialized) {
             this.bindEvents();
             this._eventsInitialized = true;
@@ -190,27 +199,28 @@ window.AppTemplateManager = {
         container.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">加载中...</div>';
         
         try {
-            // 一次请求获取详细信息
-            const res = await fetch(window.AppAPI.BASE_URL + '/api/templates?include_details=true');
-            const data = await res.json();
+            // 使用CRUD管理器加载
+            const templates = await this.crud.load();
+            this.templateList = templates;
             
-            if (!data.templates || data.templates.length === 0) {
+            if (!templates || templates.length === 0) {
                 container.innerHTML = '<div style="text-align: center; padding: 40px; color: #999;">暂无模板</div>';
                 return;
             }
-            
-            this.templateList = data.templates;
             
             // 如果有搜索词，重新应用过滤；否则显示全部
             if (this.currentSearchTerm && this.currentSearchTerm.trim()) {
                 this.filterTemplates();
             } else {
-                this.renderTemplateList(data.templates, data.default_template);
+                this.renderTemplateList(templates, null);
             }
             
         } catch (e) {
             console.error('Load template list failed:', e);
-            container.innerHTML = '<div style="text-align: center; padding: 40px; color: #f56c6c;">加载失败: ' + e.message + '</div>';
+            const container = document.getElementById('template-list-container');
+            if (container) {
+                container.innerHTML = '<div style="text-align: center; padding: 40px; color: #f56c6c;">加载失败: ' + e.message + '</div>';
+            }
         }
     },
     
@@ -356,25 +366,19 @@ window.AppTemplateManager = {
     
     async deleteTemplate(templateId, templateName) {
         try {
-            const confirmed = await AppUtils.safeConfirm(`确定要删除模板 "${templateName}" 吗？\n\n此操作不可恢复！`);
-            if (!confirmed) return;
+            // 使用CRUD管理器的delete方法
+            await this.crud.delete(templateId, {
+                confirmMessage: `确定要删除模板 "${templateName}" 吗？\n\n此操作不可恢复！`
+            });
             
-            const result = await window.AppAPI.Templates.delete(templateId);
-            
-            if (result.success) {
-                if (window.AppUtils) AppUtils.showToast('模板已删除', 'success');
-                // 重新加载模板列表
-                await this.loadTemplateListForManagement();
-                // 刷新主界面的模板选择器
-                if (window.AppFormRenderer) {
-                    await window.AppFormRenderer.reloadTemplates();
-                }
-            } else {
-                throw new Error(result.message || '删除失败');
+            // 重新加载模板列表
+            await this.loadTemplateListForManagement();
+            // 刷新主界面的模板选择器
+            if (window.AppFormRenderer) {
+                await window.AppFormRenderer.reloadTemplates();
             }
         } catch (e) {
             console.error('Delete template failed:', e);
-            if (window.AppUtils) AppUtils.showToast('删除失败: ' + e.message, 'error');
         }
     },
     

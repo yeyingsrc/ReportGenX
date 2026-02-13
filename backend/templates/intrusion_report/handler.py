@@ -2,19 +2,18 @@
 """
 @Createtime: 2026-01-26
 @Description: 入侵痕迹报告模板处理器
+使用Template Method模式消除重复的处理器方法
 """
 
 import os
-import re
-from datetime import datetime
 from typing import Dict, Any, Optional
 
-from core.base_handler import BaseTemplateHandler, register_handler
+from core.handler_utils import BaseTemplateHandlerEnhanced, ErrorHandler
+from core.base_handler import register_handler
 from core.logger import setup_logger
 
 # 初始化日志记录器
 logger = setup_logger('IntrusionHandler')
-
 
 
 # 严重等级映射
@@ -44,10 +43,16 @@ INTRUSION_TYPE_MAP = {
 
 
 @register_handler("intrusion_report")
-class IntrusionReportHandler(BaseTemplateHandler):
-    """入侵痕迹报告处理器"""
+class IntrusionReportHandler(BaseTemplateHandlerEnhanced):
+    """入侵痕迹报告处理器
     
-    def __init__(self, template_manager, template_id: str, config: Dict):
+    使用Template Method模式，自动继承日志和数据库记录方法。
+    """
+    
+    # 定义处理器类型 - 自动从配置中获取日志字段、前缀、数据库表等
+    HANDLER_TYPE = 'intrusion_report'
+    
+    def __init__(self, template_manager, template_id: str, config: Optional[Dict] = None):
         super().__init__(template_manager, template_id, config)
     
     def preprocess(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -84,15 +89,11 @@ class IntrusionReportHandler(BaseTemplateHandler):
         else:
             processed['attack_method_display'] = ''
         
-        # 设置默认日期
-        if not processed.get('discovery_time'):
-            processed['discovery_time'] = datetime.now().strftime('%Y-%m-%d')
-        if not processed.get('report_time'):
-            processed['report_time'] = datetime.now().strftime('%Y-%m-%d')
+        # 设置默认日期（使用基类辅助方法）
+        self._set_default_dates(processed, ['discovery_time', 'report_time'])
         
-        # 设置分析人员
-        if not processed.get('analyst_name'):
-            processed['analyst_name'] = self.config.get('supplierName', '')
+        # 设置分析人员（使用基类辅助方法）
+        self._set_supplier_defaults(processed, ['analyst_name'])
         
         return processed
     
@@ -162,7 +163,7 @@ class IntrusionReportHandler(BaseTemplateHandler):
                 '#intrusion_type#': data.get('intrusion_type_display', ''),
                 '#attack_method#': data.get('attack_method_display', ''),
                 '#supplierName#': data.get('supplier_name') or self.config.get('supplierName', ''),
-                '#reportTime#': datetime.now().strftime('%Y-%m-%d')
+                '#reportTime#': self.get_current_date()
             }
             replacements = self.build_replacements(data, extra_replacements)
             
@@ -198,71 +199,18 @@ class IntrusionReportHandler(BaseTemplateHandler):
     def _generate_output_path(self, data: Dict[str, Any]) -> str:
         """生成输出文件路径"""
         unit_name = data.get('unit_name', 'Unknown')
+        filename = self._build_output_filename(data)
+        return self.build_output_path(self.output_dir, unit_name, filename)
+    
+    def _build_output_filename(self, data: Dict[str, Any]) -> str:
+        """构建输出文件名"""
+        unit_name = data.get('unit_name', 'Unknown')
         intrusion_type = data.get('intrusion_type_display', data.get('intrusion_type', '入侵痕迹'))
         severity_level = data.get('severity_level', '高危')
-        victim_ip = data.get('victim_ip', '')
-        
-        # 创建客户公司目录
-        company_dir = os.path.join(self.output_dir, unit_name)
-        os.makedirs(company_dir, exist_ok=True)
-        
-        # 构建文件名
-        filename = f"【入侵痕迹报告】{unit_name}存在{intrusion_type}【{severity_level}】.docx"
-        
-        # 清理非法字符
-        filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-        
-        return os.path.join(company_dir, filename)
+        return f"【入侵痕迹报告】{unit_name}存在{intrusion_type}【{severity_level}】.docx"
     
-    def postprocess(self, output_path: str, data: Dict[str, Any]) -> None:
-        """
-        后处理：记录日志
-        """
-        try:
-            # 记录到 TXT 日志
-            report_time = data.get('report_time', self.get_current_date())
-            log_fields = [
-                data.get('intrusion_type_display', ''),
-                data.get('severity_level', ''),
-                data.get('unit_name', ''),
-                data.get('victim_ip', ''),
-                data.get('attack_method_display', ''),
-                data.get('analyst_name', self.config.get('supplierName', '')),
-                report_time
-            ]
-            # 使用统一的日志方法，前缀为 intrusion
-            self.write_txt_log(self.output_dir, "intrusion", log_fields)
-            
-            # 记录到 SQLite 数据库
-            db_name = f"{report_time}_output.db"
-            
-            # 构建记录字典
-            record = {
-                'report_id': data.get('report_id', ''),
-                'intrusion_type': data.get('intrusion_type_display', ''),
-                'severity_level': data.get('severity_level', ''),
-                'discovery_time': data.get('discovery_time', ''),
-                'report_time': report_time,
-                'analyst_name': data.get('analyst_name', ''),
-                'supplier_name': data.get('supplier_name', self.config.get('supplierName', '')),
-                'victim_ip': data.get('victim_ip', ''),
-                'victim_hostname': data.get('victim_hostname', ''),
-                'victim_os': data.get('victim_os', ''),
-                'victim_service': data.get('victim_service', ''),
-                'unit_name': data.get('unit_name', ''),
-                'unit_type': data.get('unit_type', ''),
-                'industry': data.get('industry', ''),
-                'attack_method': data.get('attack_method_display', ''),
-                'malware_name': data.get('malware_name', ''),
-                'malware_path': data.get('malware_path', ''),
-                'malware_hash': data.get('malware_hash', ''),
-                'c2_address': data.get('c2_address', ''),
-                'first_access_time': data.get('first_access_time', ''),
-                'persistence_time': data.get('persistence_time', ''),
-                'output_path': output_path
-            }
-            
-            self.write_db_log(self.output_dir, db_name, "intrusion_report", record)
-            
-        except Exception as e:
-            logger.error(f"Postprocess error: {e}")
+    # 以下方法已删除 - 现在由BaseTemplateHandlerEnhanced通过配置自动提供:
+    # - _get_log_fields()      (从handler_config.py自动获取)
+    # - _get_log_prefix()      (从handler_config.py自动获取)
+    # - _get_db_table_name()   (从handler_config.py自动获取)
+    # - _build_db_record()     (从handler_config.py自动获取)

@@ -11,54 +11,36 @@
 
 ## 目录结构
 ```
-root/
-  ├─ backend/                  # Python 后端源码与配置
-  │  ├─ api.py                 # FastAPI 后端入口
-  │  ├─ api.spec               # PyInstaller 打包配置
-  │  ├─ config.yaml            # 全局配置文件
-  │  ├─ requirements.txt       # Python 依赖
-  │  ├─ core/                  # 核心业务逻辑模块
-  │  │  ├─ logger.py           # 日志配置
-  │  │  ├─ data_reader_db.py   # 数据库读取器
-  │  │  ├─ document_editor.py  # Word 文档编辑器
-  │  │  ├─ document_image_processor.py # 图片处理器
-  │  │  ├─ report_merger.py    # 报告合并器
-  │  │  ├─ template_manager.py # 模板管理器
-  │  │  └─ base_handler.py     # 模板处理器基类
-  │  ├─ templates/             # 报告模板系统
-  │  │  ├─ vuln_report/        # 风险隐患报告模板
-  │  │  │  ├─ schema.yaml      # 表单字段定义
-  │  │  │  ├─ template.docx    # Word 模板文件
-  │  │  │  └─ handler.py       # 报告生成处理器
-  │  │  └─ intrusion_report/   # 入侵痕迹报告模板
-  │  │     ├─ schema.yaml
-  │  │     ├─ template.docx
-  │  │     └─ handler.py
-  │  ├─ data/                  # 数据库文件
-  │  │  ├─ combined.db         # 漏洞库和 ICP 备案数据库
-  │  │  └─ Excel_SQLite/       # Excel 转 SQLite 工具
-  │  └─ output/                # 输出目录
-  │     ├─ report/             # 生成的报告文件
-  │     ├─ temp/               # 临时文件（上传的图片等）
-  │     └─ logs/               # 日志文件
-  ├─ src/                      # 前端源码
-  │  ├─ index.html             # 主页面
-  │  ├─ styles.css             # 全局样式表
-  │  └─ js/                    # 前端模块化脚本
-  │     ├─ api.js              # API 交互模块
-  │     ├─ utils.js            # 通用工具函数
-  │     ├─ main.js             # 主逻辑入口
-  ├─ docs/                     # 项目文档
-  │  ├─ DEPLOYMENT_GUIDE.md    # 部署指南
-  │  ├─ TEMPLATE_DEV_GUIDE.md  # 模板开发指南
-  │  └─ TEMPLATE_QUICK_START.md# 快速入门
-  ├─ main.js                   # Electron 主进程入口
-  ├─ preload.js                # Electron 预加载脚本
-  ├─ package.json              # Node.js 项目配置
-  ├─ TEMPLATE_DEV_GUIDE.md     # 模板开发指南 (详细)
-  ├─ TEMPLATE_QUICK_START.md   # 模板快速入门 (新手)
-  ├─ DEPLOYMENT_GUIDE.md       # 部署与运维指南
-  └─ dist/                     # 打包输出目录
+├─ backend/                  # Python 后端源码与配置
+│  ├─ api.py                 # FastAPI 后端入口
+│  ├─ config.yaml            # 全局配置文件
+│  ├─ requirements.txt       # Python 依赖
+│  ├─ core/                  # 核心业务逻辑模块
+│  │  ├─ base_handler.py     # 模板处理器基类
+│  │  ├─ handler_config.py   # 处理器配置管理
+│  │  ├─ handler_utils.py    # 处理器工具类
+│  │  ├─ template_manager.py # 模板管理器
+│  │  ├─ document_editor.py  # Word 文档编辑器
+│  │  └─ ...
+│  ├─ templates/             # 报告模板系统
+│  │  ├─ vuln_report/        # 风险隐患报告模板
+│  │  ├─ intrusion_report/   # 入侵痕迹报告模板
+│  │  └─ penetration_test/   # 渗透测试报告模板
+│  ├─ data/                  # 数据库文件
+│  └─ output/                # 输出目录 (报告/临时文件/日志)
+├─ src/                      # 前端源码
+│  ├─ index.html             # 主页面
+│  ├─ styles.css             # 全局样式表
+│  └─ js/                    # 前端模块化脚本
+│     ├─ managers/           # 管理器模块
+│     └─ ...
+├─ docs/                     # 项目文档
+│  ├─ DEPLOYMENT_GUIDE.md    # 部署指南
+│  ├─ TEMPLATE_DEV_GUIDE.md  # 模板开发指南
+│  └─ TEMPLATE_QUICK_START.md# 快速入门
+├─ main.js                   # Electron 主进程入口
+├─ preload.js                # Electron 预加载脚本
+└─ package.json              # Node.js 项目配置
 ```
 
 ## 功能特性
@@ -226,9 +208,9 @@ npm run dist
 
 ### 2. 如何添加新的报告模板？
 请参考以下文档：
-- **[快速入门](TEMPLATE_QUICK_START.md)**：5分钟创建一个新模板
-- **[开发指南](TEMPLATE_DEV_GUIDE.md)**：详细的 Schema 规范和 Handler 开发文档
-- **[部署指南](DEPLOYMENT_GUIDE.md)**：如何在生产环境中管理模板
+- **[快速入门](docs/TEMPLATE_QUICK_START.md)**：5分钟创建一个新模板
+- **[开发指南](docs/TEMPLATE_DEV_GUIDE.md)**：详细的 Schema 规范和 Handler 开发文档
+- **[部署指南](docs/DEPLOYMENT_GUIDE.md)**：如何在生产环境中管理模板
 
 ### 3. 数据库文件在哪里？
 - 开发环境：`backend/data/combined.db`

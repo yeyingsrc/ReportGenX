@@ -8,10 +8,10 @@
 import os
 import yaml
 from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
 import re
+from pydantic import BaseModel, Field, field_validator, model_validator
 from .logger import setup_logger
 
 from .exceptions import (
@@ -88,124 +88,183 @@ def validate_path_safety(path: str, base_dir: str) -> bool:
 
 
 
-@dataclass
-class FieldDefinition:
-    """字段定义"""
-    key: str                          # 字段键名 (对应模板中的占位符，不含 #)
-    label: str                        # 显示标签
-    type: str                         # 字段类型: text, select, textarea, date, image, image_list, searchable_select
-    required: bool = False            # 是否必填
-    default: Any = ""                 # 默认值
-    placeholder: str = ""             # 输入提示
-    help_text: str = ""               # 帮助文本
-    options: List[Any] = field(default_factory=list)  # 下拉选项 (type=select时)
-    source: str = ""                  # 数据源 (如 "vulnerabilities", "config.hazard_types")
-    max_count: int = 5                # 最大数量 (type=image_list时)
-    group: str = "default"            # 字段分组 (用于前端UI分组显示)
-    order: int = 0                    # 显示顺序
-    readonly: bool = False            # 是否只读
-    computed: bool = False            # 是否计算字段
-    compute_from: str = ""            # 计算来源字段
-    compute_rule: Dict = field(default_factory=dict)  # 计算规则
-    on_change: str = ""               # 值变化时触发的行为ID
-    validation: Dict = field(default_factory=dict)    # 验证规则
-    auto_generate: bool = False       # 是否自动生成
-    auto_generate_rule: str = ""      # 自动生成规则
-    auto_fill_from: str = ""          # 自动填充来源
-    fill_field: str = ""              # 填充的字段名
-    template_placeholder: str = ""    # 模板中的占位符
-    inline_group: str = ""            # 内联分组 (同一行显示)
-    rows: int = 3                     # textarea 行数
-    accept: str = ""                  # 文件接受类型
-    max_size_mb: int = 5              # 最大文件大小
-    paste_enabled: bool = False       # 是否支持粘贴
-    with_description: bool = False    # 图片是否带描述
-    description_placeholder: str = "" # 描述输入提示
-    search_placeholder: str = ""      # 搜索提示
-    display_field: str = ""           # 显示字段
-    value_field: str = ""             # 值字段
-    editable_config: bool = False     # 是否可编辑配置
-    save_to_config: bool = False      # 是否保存到配置
-    presets: Dict = field(default_factory=dict)  # 预设值 (根据选择自动填充其他字段)
-    show_if: Dict = field(default_factory=dict)   # 条件显示逻辑 -> {field: "xxx", value: "yyy"}
-    transform: str = ""               # 数据转换规则 (例如 "uppercase", "json")
+# 允许的字段类型
+ALLOWED_FIELD_TYPES = {
+    'text', 'select', 'textarea', 'date', 'image', 'image_list', 
+    'searchable_select', 'checkbox', 'checkbox_group', 'number',
+    'target_list', 'vuln_list', 'tester_info_list'
+}
+
+# 允许的数据源类型
+ALLOWED_DATA_SOURCE_TYPES = {'database', 'config', 'api'}
+
+# 允许的行为动作类型
+ALLOWED_ACTION_TYPES = {'api_call', 'compute', 'set_value'}
 
 
-@dataclass
-class FieldGroup:
+class FieldDefinition(BaseModel):
+    """字段定义 (Pydantic 模型，带运行时验证)"""
+    key: str = Field(..., description="字段键名 (对应模板中的占位符，不含 #)")
+    label: str = Field(..., description="显示标签")
+    type: str = Field(..., description="字段类型")
+    required: bool = Field(default=False, description="是否必填")
+    default: Any = Field(default="", description="默认值")
+    placeholder: str = Field(default="", description="输入提示")
+    help_text: str = Field(default="", description="帮助文本")
+    options: List[Any] = Field(default_factory=list, description="下拉选项")
+    source: str = Field(default="", description="数据源")
+    max_count: int = Field(default=5, ge=1, le=100, description="最大数量")
+    group: str = Field(default="default", description="字段分组")
+    order: int = Field(default=0, ge=0, description="显示顺序")
+    readonly: bool = Field(default=False, description="是否只读")
+    computed: bool = Field(default=False, description="是否计算字段")
+    compute_from: str = Field(default="", description="计算来源字段")
+    compute_rule: Dict = Field(default_factory=dict, description="计算规则")
+    on_change: str = Field(default="", description="值变化时触发的行为ID")
+    validation: Dict = Field(default_factory=dict, description="验证规则")
+    auto_generate: bool = Field(default=False, description="是否自动生成")
+    auto_generate_rule: str = Field(default="", description="自动生成规则")
+    auto_fill_from: str = Field(default="", description="自动填充来源")
+    fill_field: str = Field(default="", description="填充的字段名")
+    template_placeholder: str = Field(default="", description="模板中的占位符")
+    inline_group: str = Field(default="", description="内联分组")
+    rows: int = Field(default=3, ge=1, le=50, description="textarea 行数")
+    accept: str = Field(default="", description="文件接受类型")
+    max_size_mb: int = Field(default=5, ge=1, le=100, description="最大文件大小MB")
+    paste_enabled: bool = Field(default=False, description="是否支持粘贴")
+    with_description: bool = Field(default=False, description="图片是否带描述")
+    description_placeholder: str = Field(default="", description="描述输入提示")
+    search_placeholder: str = Field(default="", description="搜索提示")
+    display_field: str = Field(default="", description="显示字段")
+    value_field: str = Field(default="", description="值字段")
+    editable_config: bool = Field(default=False, description="是否可编辑配置")
+    save_to_config: bool = Field(default=False, description="是否保存到配置")
+    presets: Dict = Field(default_factory=dict, description="预设值")
+    show_if: Dict = Field(default_factory=dict, description="条件显示逻辑")
+    transform: str = Field(default="", description="数据转换规则")
+    columns: List[Dict] = Field(default_factory=list, description="列定义(复杂类型)")
+    
+    model_config = {"extra": "allow"}  # 允许额外字段，保持向后兼容
+    
+    @field_validator('type')
+    @classmethod
+    def validate_field_type(cls, v: str) -> str:
+        """验证字段类型是否在允许列表中"""
+        if v not in ALLOWED_FIELD_TYPES:
+            logger.warning(f"Unknown field type: {v}, allowed types: {ALLOWED_FIELD_TYPES}")
+            # 不抛出异常，只警告，保持向后兼容
+        return v
+    
+    @field_validator('key')
+    @classmethod
+    def validate_key_format(cls, v: str) -> str:
+        """验证字段键名格式"""
+        if not v:
+            raise ValueError("Field key cannot be empty")
+        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', v):
+            logger.warning(f"Field key '{v}' does not follow snake_case convention")
+        return v
+
+
+class FieldGroup(BaseModel):
     """字段分组"""
     id: str
     name: str
     icon: str = ""
-    order: int = 0
+    order: int = Field(default=0, ge=0)
     collapsed: bool = False
 
 
-@dataclass
-class DataSourceDef:
+class DataSourceDef(BaseModel):
     """数据源定义"""
     id: str
-    type: str                         # database, config, api
+    type: str
     description: str = ""
-    config_key: str = ""              # type=config 时的配置键名
-    endpoint: str = ""                # type=api 时的端点
-
-
-@dataclass
-class BehaviorAction:
-    """行为动作"""
-    type: str                         # api_call, compute, set_value
+    config_key: str = ""
     endpoint: str = ""
-    params: Dict = field(default_factory=dict)
-    result_mapping: Dict = field(default_factory=dict)
+    
+    @field_validator('type')
+    @classmethod
+    def validate_type(cls, v: str) -> str:
+        if v not in ALLOWED_DATA_SOURCE_TYPES:
+            raise ValueError(f"Invalid data source type: {v}, allowed: {ALLOWED_DATA_SOURCE_TYPES}")
+        return v
+
+
+class BehaviorAction(BaseModel):
+    """行为动作"""
+    type: str
+    endpoint: str = ""
+    params: Dict = Field(default_factory=dict)
+    result_mapping: Dict = Field(default_factory=dict)
     target: str = ""
-    rules: Dict = field(default_factory=dict)
+    rules: Dict = Field(default_factory=dict)
+    expression: str = ""  # compute 类型的表达式
+    
+    @field_validator('type')
+    @classmethod
+    def validate_type(cls, v: str) -> str:
+        if v not in ALLOWED_ACTION_TYPES:
+            logger.warning(f"Unknown action type: {v}")
+        return v
 
 
-@dataclass
-class Behavior:
+class Behavior(BaseModel):
     """行为定义"""
     id: str
-    trigger_field: str
+    trigger_field: str = ""
     trigger_event: str = "change"
-    actions: List[BehaviorAction] = field(default_factory=list)
+    actions: List[BehaviorAction] = Field(default_factory=list)
 
 
-@dataclass
-class ValidationRule:
+class ValidationRule(BaseModel):
     """验证规则"""
     fields: List[str]
     rule: str
     message: str
 
 
-@dataclass
-class PreviewField:
+class PreviewField(BaseModel):
     """预览字段"""
     key: str
     label: str
 
 
-@dataclass
-class TemplateInfo:
+class TemplateInfo(BaseModel):
     """模板信息"""
-    id: str                           # 模板唯一ID
-    name: str                         # 模板显示名称
-    description: str = ""             # 模板描述
-    version: str = "1.0.0"            # 模板版本
-    order: int = 999                  # 显示顺序 (数字越小越靠前)
-    template_file: str = ""           # 模板文件名 (相对于模板目录)
-    icon: str = ""                    # 图标 (可选)
-    author: str = ""                  # 作者
-    create_time: str = ""             # 创建时间
-    update_time: str = ""             # 更新时间
-    fields: List[FieldDefinition] = field(default_factory=list)
-    field_groups: List[FieldGroup] = field(default_factory=list)
-    data_sources: List[DataSourceDef] = field(default_factory=list)
-    behaviors: List[Behavior] = field(default_factory=list)
-    validation_rules: List[ValidationRule] = field(default_factory=list)
-    output_config: Dict = field(default_factory=dict)
-    preview_config: Dict = field(default_factory=dict)
+    id: str
+    name: str
+    description: str = ""
+    version: str = "1.0.0"
+    order: int = Field(default=999, ge=0)
+    template_file: str = ""
+    icon: str = ""
+    author: str = ""
+    create_time: str = ""
+    update_time: str = ""
+    fields: List[FieldDefinition] = Field(default_factory=list)
+    field_groups: List[FieldGroup] = Field(default_factory=list)
+    data_sources: List[DataSourceDef] = Field(default_factory=list)
+    behaviors: List[Behavior] = Field(default_factory=list)
+    validation_rules: List[ValidationRule] = Field(default_factory=list)
+    output_config: Dict = Field(default_factory=dict)
+    preview_config: Dict = Field(default_factory=dict)
+    
+    @field_validator('id')
+    @classmethod
+    def validate_template_id(cls, v: str) -> str:
+        """验证模板 ID 格式 (snake_case)"""
+        if not validate_template_id(v):
+            raise ValueError(f"Invalid template ID format: {v}. Must be snake_case (e.g., vuln_report)")
+        return v
+    
+    @field_validator('version')
+    @classmethod
+    def validate_version_format(cls, v: str) -> str:
+        """验证版本号格式"""
+        if not re.match(r'^\d+\.\d+\.\d+$', v):
+            logger.warning(f"Version '{v}' does not follow semantic versioning (x.y.z)")
+        return v
 
 
 class TemplateManager:
@@ -275,74 +334,38 @@ class TemplateManager:
             return
         
         try:
+            # 使用 Pydantic 模型直接从字典解析（自动验证）
             
             # 解析字段分组
             field_groups = []
             for idx, group_data in enumerate(schema.get('field_groups', [])):
-                group = FieldGroup(
-                    id=group_data.get('id', f'group_{idx}'),
-                    name=group_data.get('name', ''),
-                    icon=group_data.get('icon', ''),
-                    order=group_data.get('order', idx),
-                    collapsed=group_data.get('collapsed', False)
-                )
-                field_groups.append(group)
+                group_data.setdefault('id', f'group_{idx}')
+                group_data.setdefault('order', idx)
+                try:
+                    group = FieldGroup(**group_data)
+                    field_groups.append(group)
+                except Exception as e:
+                    logger.warning(f"Invalid field group in {template_id}: {e}")
             field_groups.sort(key=lambda x: x.order)
             
             # 解析数据源定义
             data_sources = []
             for ds_data in schema.get('data_sources', []):
-                ds = DataSourceDef(
-                    id=ds_data.get('id', ''),
-                    type=ds_data.get('type', 'config'),
-                    description=ds_data.get('description', ''),
-                    config_key=ds_data.get('config_key', ''),
-                    endpoint=ds_data.get('endpoint', '')
-                )
-                data_sources.append(ds)
+                try:
+                    ds = DataSourceDef(**ds_data)
+                    data_sources.append(ds)
+                except Exception as e:
+                    logger.warning(f"Invalid data source in {template_id}: {e}")
             
             # 解析字段定义
             fields = []
             for idx, field_data in enumerate(schema.get('fields', [])):
-                field_def = FieldDefinition(
-                    key=field_data.get('key', ''),
-                    label=field_data.get('label', ''),
-                    type=field_data.get('type', 'text'),
-                    required=field_data.get('required', False),
-                    default=field_data.get('default', ''),
-                    placeholder=field_data.get('placeholder', ''),
-                    help_text=field_data.get('help_text', ''),
-                    options=field_data.get('options', []),
-                    source=field_data.get('source', ''),
-                    max_count=field_data.get('max_count', 5),
-                    group=field_data.get('group', 'default'),
-                    order=field_data.get('order', idx),
-                    readonly=field_data.get('readonly', False),
-                    computed=field_data.get('computed', False),
-                    compute_from=field_data.get('compute_from', ''),
-                    compute_rule=field_data.get('compute_rule', {}),
-                    on_change=field_data.get('on_change', ''),
-                    validation=field_data.get('validation', {}),
-                    auto_generate=field_data.get('auto_generate', False),
-                    auto_generate_rule=field_data.get('auto_generate_rule', ''),
-                    auto_fill_from=field_data.get('auto_fill_from', ''),
-                    fill_field=field_data.get('fill_field', ''),
-                    template_placeholder=field_data.get('template_placeholder', ''),
-                    inline_group=field_data.get('inline_group', ''),
-                    rows=field_data.get('rows', 3),
-                    accept=field_data.get('accept', ''),
-                    max_size_mb=field_data.get('max_size_mb', 5),
-                    paste_enabled=field_data.get('paste_enabled', False),
-                    with_description=field_data.get('with_description', False),
-                    description_placeholder=field_data.get('description_placeholder', ''),
-                    search_placeholder=field_data.get('search_placeholder', ''),
-                    display_field=field_data.get('display_field', ''),
-                    value_field=field_data.get('value_field', ''),
-                    editable_config=field_data.get('editable_config', False),
-                    save_to_config=field_data.get('save_to_config', False),
-                    presets=field_data.get('presets', {})
-                )
-                fields.append(field_def)
+                field_data.setdefault('order', idx)
+                try:
+                    field_def = FieldDefinition(**field_data)
+                    fields.append(field_def)
+                except Exception as e:
+                    logger.warning(f"Invalid field '{field_data.get('key', 'unknown')}' in {template_id}: {e}")
             
             # 按 order 排序
             fields.sort(key=lambda x: x.order)
@@ -353,55 +376,57 @@ class TemplateManager:
                 trigger = beh_data.get('trigger', {})
                 actions = []
                 for act_data in beh_data.get('actions', []):
-                    action = BehaviorAction(
-                        type=act_data.get('type', ''),
-                        endpoint=act_data.get('endpoint', ''),
-                        params=act_data.get('params', {}),
-                        result_mapping=act_data.get('result_mapping', {}),
-                        target=act_data.get('target', ''),
-                        rules=act_data.get('rules', {})
-                    )
-                    actions.append(action)
+                    try:
+                        action = BehaviorAction(**act_data)
+                        actions.append(action)
+                    except Exception as e:
+                        logger.warning(f"Invalid action in {template_id}: {e}")
                 
-                behavior = Behavior(
-                    id=beh_data.get('id', ''),
-                    trigger_field=trigger.get('field', ''),
-                    trigger_event=trigger.get('event', 'change'),
-                    actions=actions
-                )
-                behaviors.append(behavior)
+                try:
+                    behavior = Behavior(
+                        id=beh_data.get('id', ''),
+                        trigger_field=trigger.get('field', ''),
+                        trigger_event=trigger.get('event', 'change'),
+                        actions=actions
+                    )
+                    behaviors.append(behavior)
+                except Exception as e:
+                    logger.warning(f"Invalid behavior in {template_id}: {e}")
             
             # 解析验证规则
             validation_rules = []
             validation_data = schema.get('validation', {})
             for rule_data in validation_data.get('rules', []):
-                rule = ValidationRule(
-                    fields=rule_data.get('fields', []),
-                    rule=rule_data.get('rule', ''),
-                    message=rule_data.get('message', '')
-                )
-                validation_rules.append(rule)
+                try:
+                    rule = ValidationRule(**rule_data)
+                    validation_rules.append(rule)
+                except Exception as e:
+                    logger.warning(f"Invalid validation rule in {template_id}: {e}")
             
-            # 创建模板信息
-            template_info = TemplateInfo(
-                id=schema.get('id', template_id),
-                name=schema.get('name', template_id),
-                description=schema.get('description', ''),
-                version=schema.get('version', '1.0.0'),
-                order=schema.get('order', 999),
-                template_file=schema.get('template_file', 'template.docx'),
-                icon=schema.get('icon', ''),
-                author=schema.get('author', ''),
-                create_time=schema.get('create_time', ''),
-                update_time=schema.get('update_time', ''),
-                fields=fields,
-                field_groups=field_groups,
-                data_sources=data_sources,
-                behaviors=behaviors,
-                validation_rules=validation_rules,
-                output_config=schema.get('output', {}),
-                preview_config=schema.get('preview', {})
-            )
+            # 创建模板信息（使用 Pydantic 模型）
+            try:
+                template_info = TemplateInfo(
+                    id=schema.get('id', template_id),
+                    name=schema.get('name', template_id),
+                    description=schema.get('description', ''),
+                    version=schema.get('version', '1.0.0'),
+                    order=schema.get('order', 999),
+                    template_file=schema.get('template_file', 'template.docx'),
+                    icon=schema.get('icon', ''),
+                    author=schema.get('author', ''),
+                    create_time=schema.get('create_time', ''),
+                    update_time=schema.get('update_time', ''),
+                    fields=fields,
+                    field_groups=field_groups,
+                    data_sources=data_sources,
+                    behaviors=behaviors,
+                    validation_rules=validation_rules,
+                    output_config=schema.get('output', {}),
+                    preview_config=schema.get('preview', {})
+                )
+            except Exception as e:
+                logger.error(f"Failed to create TemplateInfo for {template_id}: {e}")
+                return
             
             self._templates[template_info.id] = template_info
             

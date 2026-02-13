@@ -87,7 +87,10 @@ function createWindow () {
     width: 1200,
     height: 800,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js')
+      preload: path.join(__dirname, 'preload.js'),
+      // 显式禁用沙箱，因为 preload.js 需要使用 Node.js 模块 (fs, path)
+      // 注意：这是为了读取配置文件，contextIsolation 仍然启用以保证安全
+      sandbox: false
     }
   })
 

@@ -97,12 +97,6 @@ def setup_logger(name: str, level: int = None) -> logging.Logger:
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(level)
     console_handler.setFormatter(formatter)
-    # Windows 控制台编码修复
-    if sys.platform == 'win32':
-        try:
-            console_handler.stream.reconfigure(encoding='utf-8')
-        except Exception:
-            pass
     logger.addHandler(console_handler)
     
     # 2. 文件处理器（带日志轮转）

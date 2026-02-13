@@ -1,12 +1,20 @@
-// toolbox.js - 工具箱与报告合并逻辑
+// toolbox.js - 工具箱与报告合并逻辑 (重构版 - 使用CRUDManager)
 
 window.AppToolbox = {
     ALL_REPORTS: [],
     SELECTED_REPORTS: [],
     ICP_LIST: [],
-    ICP_SELECTED_IDS: [], // New state for ICP batch ops
+    ICP_SELECTED_IDS: [],
+    crud: null,  // CRUD管理器
 
     init() {
+        // 初始化CRUD管理器
+        this.crud = new CRUDManager(
+            window.AppAPI.Reports,
+            (items) => { this.ALL_REPORTS = items; this.renderUI(); },
+            () => window.AppAPI.Reports.list()
+        );
+        
         this.cacheDom();
         this.bindEvents();
     },
@@ -124,8 +132,8 @@ window.AppToolbox = {
         if(!this.sourceList) return;
         this.sourceList.innerHTML = '<div>Loading...</div>';
         try {
-            const res = await fetch(`${window.AppAPI.BASE_URL}/api/list-reports`, { method: 'POST' });
-            this.ALL_REPORTS = await res.json();
+            // 使用CRUD管理器加载
+            this.ALL_REPORTS = await this.crud.load();
             // sync selection
             this.SELECTED_REPORTS = this.SELECTED_REPORTS.filter(p => this.ALL_REPORTS.find(r => r.path === p));
             this.renderUI();
@@ -246,34 +254,30 @@ window.AppToolbox = {
 
     async deleteReport(path) {
         try {
-            const res = await fetch(`${window.AppAPI.BASE_URL}/api/delete-report`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ path })
+            // 使用CRUD管理器的delete方法
+            await this.crud.delete(path, {
+                confirmMessage: `确定要删除此报告吗？`
             });
-            if(res.ok) {
-                AppUtils.showToast("已删除", "success");
-                const idx = this.SELECTED_REPORTS.indexOf(path);
-                if(idx > -1) this.SELECTED_REPORTS.splice(idx, 1);
-                this.loadReportFiles();
-            } else {
-                AppUtils.showToast("删除失败", "error");
-            }
-        } catch(e) { AppUtils.showToast(e.message, "error"); }
+            const idx = this.SELECTED_REPORTS.indexOf(path);
+            if(idx > -1) this.SELECTED_REPORTS.splice(idx, 1);
+            this.loadReportFiles();
+        } catch(e) { 
+            console.error(e);
+        }
     },
 
     async batchDelete() {
         if(await AppUtils.safeConfirm(`确认删除选中的 ${this.SELECTED_REPORTS.length} 个文件?`)) {
-            for(const path of this.SELECTED_REPORTS) {
-                await fetch(`${window.AppAPI.BASE_URL}/api/delete-report`, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ path })
+            try {
+                // 使用CRUD管理器的batchDelete方法
+                await this.crud.batchDelete(this.SELECTED_REPORTS, {
+                    confirmMessage: `确认删除选中的 ${this.SELECTED_REPORTS.length} 个文件?`
                 });
+                this.SELECTED_REPORTS = [];
+                this.loadReportFiles();
+            } catch(e) {
+                console.error(e);
             }
-            AppUtils.showToast("批量删除完成", "success");
-            this.SELECTED_REPORTS = [];
-            this.loadReportFiles();
         }
     },
 
@@ -286,15 +290,7 @@ window.AppToolbox = {
         btn.disabled = true; btn.innerText = "合并中...";
 
         try {
-            const res = await fetch(`${window.AppAPI.BASE_URL}/api/merge-reports`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    files: this.SELECTED_REPORTS,
-                    output_filename: filename
-                })
-            });
-            const result = await res.json();
+            const result = await AppAPI.Reports.merge(this.SELECTED_REPORTS, filename);
             
             if(result.success) {
                 if(await AppUtils.safeConfirm(`合并成功！打开文件夹？`)) {

@@ -283,7 +283,7 @@ fields:
     type: text
     required: false
     group: intrusion
-    order: 1.5
+    order: 2
     placeholder: 如漏洞库中没有，请手动输入攻击手法
     help_text: 如漏洞库中没有合适的选项，可以手动输入
     
@@ -292,7 +292,7 @@ fields:
     type: text
     required: false
     group: intrusion
-    order: 2
+    order: 3
     placeholder: "如发现恶意程序，填写名称"
     template_placeholder: "#malware_name#"
     
@@ -301,7 +301,7 @@ fields:
     type: text
     required: false
     group: intrusion
-    order: 3
+    order: 4
     placeholder: "/var/www/html/shell.php"
     template_placeholder: "#malware_path#"
     
@@ -310,7 +310,7 @@ fields:
     type: text
     required: false
     group: intrusion
-    order: 4
+    order: 5
     placeholder: "32位MD5或64位SHA256"
     template_placeholder: "#malware_hash#"
     
@@ -319,7 +319,7 @@ fields:
     type: text
     required: false
     group: intrusion
-    order: 5
+    order: 6
     placeholder: "IP或域名"
     template_placeholder: "#c2_address#"
     
@@ -328,7 +328,7 @@ fields:
     type: textarea
     required: true
     group: intrusion
-    order: 6
+    order: 7
     rows: 5
     placeholder: "详细描述发现的入侵痕迹..."
     template_placeholder: "#intrusion_description#"
@@ -338,7 +338,7 @@ fields:
     type: textarea
     required: true
     group: intrusion
-    order: 7
+    order: 8
     rows: 4
     placeholder: "评估此次入侵对系统和业务的影响..."
     template_placeholder: "#impact_assessment#"
@@ -348,7 +348,7 @@ fields:
     type: textarea
     required: true
     group: intrusion
-    order: 8
+    order: 9
     rows: 4
     placeholder: "提供针对性的处置和加固建议..."
     template_placeholder: "#remediation_suggestion#"

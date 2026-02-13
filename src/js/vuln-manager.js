@@ -1,10 +1,18 @@
-// vuln-manager.js - 漏洞库管理
+// vuln-manager.js - 漏洞库管理 (重构版 - 使用CRUDManager)
 
 window.AppVulnManager = {
     VULN_LIST: [],
+    crud: null,
     
     // 初始化
     init() {
+        // 初始化CRUD管理器
+        this.crud = new CRUDManager(
+            window.AppAPI.Vulnerabilities,
+            (items) => this.renderList(items),
+            () => window.AppAPI.getVulnerabilities()
+        );
+        
         this.cacheDom();
         this.bindEvents();
     },
@@ -52,19 +60,15 @@ window.AppVulnManager = {
         }
     },
 
-    // 加载漏洞列表
+    // 加载漏洞列表 - 使用CRUD管理器
     async loadVulnerabilities() {
         try {
-            const vulns = await window.AppAPI.getVulnerabilities();
-            this.VULN_LIST = vulns; // Cache full objects
-            
-            this.renderList(vulns);
+            const vulns = await this.crud.load();
+            this.VULN_LIST = vulns;
             this.renderDropdown();
-            
             return vulns;
         } catch(e) { 
             console.error(e); 
-            // AppUtils.showToast("加载漏洞列表失败", "error"); 
             return [];
         }
     },
@@ -204,52 +208,44 @@ window.AppVulnManager = {
         document.querySelectorAll('.vuln-list-item').forEach(el => el.classList.remove('active'));
     },
     
-    // 增删改逻辑
+    // 增删改逻辑 - 使用CRUD管理器
     async saveVuln() {
-        const idField = document.getElementById('manage-vuln-id');
-        const id = idField ? idField.value : "";
-        const btn = document.getElementById('btn-manager-save');
-        if(btn) btn.disabled = true;
+         const idField = document.getElementById('manage-vuln-id');
+         const id = idField ? idField.value : "";
+         const btn = document.getElementById('btn-manager-save');
+         if(btn) btn.disabled = true;
 
-        const nameVal = document.getElementById('manage-name').value.trim();
-        if (!nameVal) {
-            AppUtils.showToast("漏洞名称不能为空", "error");
-            if(btn) btn.disabled = false;
-            return;
-        }
+         const nameVal = document.getElementById('manage-name').value.trim();
+         if (!nameVal) {
+             AppUtils.showToast("漏洞名称不能为空", "error");
+             if(btn) btn.disabled = false;
+             return;
+         }
 
-        const data = {
-            name: nameVal,
-            category: document.getElementById('manage-category').value,
-            port: document.getElementById('manage-port').value,
-            level: document.getElementById('manage-level').value,
-            basis: document.getElementById('manage-basis').value,
-            description: document.getElementById('manage-desc').value,
-            impact: document.getElementById('manage-impact').value,
-            suggestion: document.getElementById('manage-suggestion').value
-        };
+         const data = {
+             id: id || undefined,
+             name: nameVal,
+             category: document.getElementById('manage-category').value,
+             port: document.getElementById('manage-port').value,
+             level: document.getElementById('manage-level').value,
+             basis: document.getElementById('manage-basis').value,
+             description: document.getElementById('manage-desc').value,
+             impact: document.getElementById('manage-impact').value,
+             suggestion: document.getElementById('manage-suggestion').value
+         };
 
-        try {
-            let result;
-            if (id) {
-                // Update
-                result = await window.AppAPI.updateVulnerability(id, data);
-            } else {
-                // Create
-                result = await window.AppAPI.saveVulnerability(data);
-            }
-            
-            AppUtils.showToast(result.message || "保存成功", "success");
-            await this.loadVulnerabilities(); // Refresh List
-            if(!id) this.resetForm(); // If new, clear form. 
-            
-        } catch(e) {
-            console.error(e);
-            AppUtils.showToast(e.message || "操作失败", "error");
-        } finally {
-            if(btn) btn.disabled = false;
-        }
-    },
+         try {
+             // 使用CRUD管理器的save方法
+             await this.crud.save(data, {
+                 successMessage: id ? "漏洞更新成功" : "漏洞保存成功"
+             });
+             if(!id) this.resetForm();
+         } catch(e) {
+             console.error(e);
+         } finally {
+             if(btn) btn.disabled = false;
+         }
+     },
 
     async deleteVuln() {
         const idField = document.getElementById('manage-vuln-id');
@@ -257,16 +253,14 @@ window.AppVulnManager = {
         
         if (!id) return AppUtils.showToast("请先在左侧选择要删除的漏洞", "info");
         
-        if (await AppUtils.safeConfirm("确定要删除该漏洞吗？此操作不可恢复。")) {
-            try {
-                const result = await window.AppAPI.deleteVulnerability(id);
-                AppUtils.showToast(result.message || "删除成功", "success");
-                this.resetForm();
-                await this.loadVulnerabilities();
-            } catch(e) { 
-                console.error(e);
-                AppUtils.showToast(e.message || "删除失败", "error"); 
-            }
+        // 使用CRUD管理器的delete方法
+        try {
+            await this.crud.delete(id, {
+                confirmMessage: "确定要删除该漏洞吗？此操作不可恢复。"
+            });
+            this.resetForm();
+        } catch(e) {
+            console.error(e);
         }
     },
 

@@ -5,9 +5,9 @@
 @description: 表格文本替换与目录处理
 """
 from copy import deepcopy
-from docx.oxml.ns import qn, nsmap
+from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-from docx.shared import RGBColor, Pt
+from docx.shared import RGBColor
 
 # 风险等级颜色映射
 RISK_LEVEL_COLORS = {
@@ -379,3 +379,36 @@ class DocumentEditor:
         
         # 设置为 true
         update_fields.set(qn('w:val'), 'true')
+
+    @staticmethod
+    def clear_paragraph_indent(para) -> None:
+        """
+        清除段落首行缩进
+        
+        用于表格单元格等需要清除默认缩进的场景。
+        
+        Args:
+            para: 段落对象 (docx.text.paragraph.Paragraph)
+        """
+        p = para._element
+        pPr = p.pPr
+        if pPr is None:
+            pPr = OxmlElement('w:pPr')
+            p.insert(0, pPr)
+        ind = pPr.find(qn('w:ind'))
+        if ind is None:
+            ind = OxmlElement('w:ind')
+            pPr.append(ind)
+        ind.set(qn('w:firstLine'), '0')
+        ind.set(qn('w:firstLineChars'), '0')
+
+    @staticmethod
+    def clear_cell_indent(cell) -> None:
+        """
+        清除单元格中所有段落的首行缩进
+        
+        Args:
+            cell: 表格单元格对象
+        """
+        for para in cell.paragraphs:
+            DocumentEditor.clear_paragraph_indent(para)

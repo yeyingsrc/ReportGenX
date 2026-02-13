@@ -10,19 +10,22 @@ import json
 import zipfile
 import subprocess
 import traceback
+from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import tldextract
 import uvicorn
 import yaml
 from PIL import Image
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -144,6 +147,53 @@ def get_template_manager():
     return _template_manager
 
 
+# ========== FastAPI 依赖注入类型别名 ==========
+# 使用 Annotated 模式减少重复的 get_xxx() 调用
+DbReaderDep = Annotated[DbDataReader, Depends(get_db_reader)]
+TemplateManagerDep = Annotated[TemplateManager, Depends(get_template_manager)]
+
+
+def get_vulnerabilities_cache() -> Tuple[List, Dict]:
+    """依赖注入：获取漏洞缓存"""
+    return get_cached_vulnerabilities()
+
+
+def get_icp_cache() -> Dict:
+    """依赖注入：获取 ICP 缓存"""
+    return get_cached_icp_infos()
+
+
+VulnCacheDep = Annotated[Tuple[List, Dict], Depends(get_vulnerabilities_cache)]
+IcpCacheDep = Annotated[Dict, Depends(get_icp_cache)]
+
+
+# ========== 通用响应辅助函数 ==========
+def success_response(message: str = "操作成功", **kwargs) -> Dict[str, Any]:
+    """生成成功响应"""
+    return {"success": True, "message": message, **kwargs}
+
+
+def error_response(message: str, detail: Optional[str] = None) -> Dict[str, Any]:
+    """生成错误响应"""
+    return {"success": False, "message": message, "detail": detail}
+
+
+def handle_db_result(success: bool, msg: str, reload_cache_fn=None) -> Dict[str, Any]:
+    """
+    统一处理数据库操作结果
+    
+    Args:
+        success: 操作是否成功
+        msg: 操作消息
+        reload_cache_fn: 成功后需要调用的缓存刷新函数
+    """
+    if success:
+        if reload_cache_fn:
+            reload_cache_fn()
+        return success_response(msg)
+    raise HTTPException(status_code=400, detail=msg)
+
+
 # 为了兼容性，保留全局变量别名
 # 注意：直接赋值的地方需要使用 reload_xxx_cache() 函数
 
@@ -168,6 +218,7 @@ class UrlProcessResponse(BaseModel):
     icp_info: Optional[Dict[str, Any]] = None
 
 class CustomVulnRequest(BaseModel):
+    id: Optional[str] = None  # 编辑时使用，新增时为空
     name: str
     category: Optional[str] = ""
     port: Optional[str] = ""
@@ -257,17 +308,97 @@ class BatchDeleteRequest(BaseModel):
 class UpdateConfigRequest(BaseModel):
     supplierName: str
 
-app = FastAPI()
+class OpenFolderRequest(BaseModel):
+    """打开文件夹请求"""
+    path: Optional[str] = None
 
-@app.on_event("startup")
-async def startup_event():
-    """应用启动时初始化模板管理器"""
+class ListReportsRequest(BaseModel):
+    """列出报告请求（预留分页/过滤）"""
+    page: Optional[int] = 1
+    limit: Optional[int] = 100
+    folder: Optional[str] = None
+
+
+# ========== 统一错误响应模型 ==========
+class ErrorResponse(BaseModel):
+    """统一的错误响应格式"""
+    success: bool = False
+    error: str
+    detail: Optional[str] = None
+
+
+# ========== Lifespan 生命周期管理 (替代废弃的 @app.on_event) ==========
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    应用生命周期管理器
+    - startup: 初始化模板管理器
+    - shutdown: 清理资源
+    """
+    # Startup
     get_template_manager()
     logger.info("Template system initialized")
+    yield
+    # Shutdown (如有需要可在此添加清理逻辑)
+    logger.info("Application shutting down")
+
+
+app = FastAPI(lifespan=lifespan)
+
+
+# ========== 全局异常处理器 (统一错误响应) ==========
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """处理 HTTP 异常，返回统一格式"""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "error": str(exc.detail),
+            "detail": None
+        }
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """处理请求验证错误，返回统一格式"""
+    errors = exc.errors()
+    error_messages = [f"{err['loc']}: {err['msg']}" for err in errors]
+    return JSONResponse(
+        status_code=422,
+        content={
+            "success": False,
+            "error": "Validation Error",
+            "detail": "; ".join(error_messages)
+        }
+    )
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """处理未捕获的异常"""
+    logger.error(f"Unhandled exception: {traceback.format_exc()}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "error": "Internal Server Error",
+            "detail": str(exc) if os.getenv("DEBUG") else None
+        }
+    )
+
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://127.0.0.1:*",
+        "http://localhost:*",
+        "http://127.0.0.1",
+        "http://localhost",
+        "file://*",  # Electron file:// 协议
+        "*"  # 保留通配符作为后备（桌面应用场景）
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -434,7 +565,10 @@ def upload_image(req: UploadImageRequest):
                 
                 # 重新打开以读取属性（verify后需重新打开）
                 with Image.open(io.BytesIO(data)) as valid_img:
-                    fmt = valid_img.format.lower()
+                    img_format = valid_img.format
+                    if img_format is None:
+                        raise HTTPException(status_code=400, detail="Unable to determine image format")
+                    fmt = img_format.lower()
                     
                     # 白名单格式检查
                     ALLOWED_FORMATS = {'png', 'jpeg', 'jpg', 'gif', 'bmp'}
@@ -536,55 +670,31 @@ def get_vulnerabilities():
         return []
 
 @app.post("/api/vulnerabilities")
-def add_vulnerability(vuln: CustomVulnRequest):
+def add_vulnerability(vuln: CustomVulnRequest, db: DbReaderDep):
     """添加新漏洞"""
-    try:
-        success, msg = get_db_reader().add_vulnerability_to_db(vuln.dict())
-        if not success:
-            raise HTTPException(status_code=400, detail=msg)
-    
-        # 立即刷新缓存
-        reload_vulnerabilities_cache()
-        
-        return {"success": True, "message": msg}
-    except Exception as e:
-        logger.error(f"Add vulnerability failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # 移除 id 字段（如果存在），因为新增时不需要
+    data = vuln.dict(exclude={'id'})
+    success, msg = db.add_vulnerability_to_db(data)
+    return handle_db_result(success, msg, reload_vulnerabilities_cache)
 
 @app.put("/api/vulnerabilities/{Vuln_id}")
-def update_vulnerability(Vuln_id: str, vuln: CustomVulnRequest):
+def update_vulnerability(Vuln_id: str, vuln: CustomVulnRequest, db: DbReaderDep):
     """更新漏洞信息"""
-    try:
-        success, msg = get_db_reader().update_vulnerability_in_db(Vuln_id, vuln.dict())
-        if not success:
-            raise HTTPException(status_code=400, detail=msg)
-
-        reload_vulnerabilities_cache()
-
-        return {"success": True, "message": msg}
-    except Exception as e:
-        logger.error(f"Update vulnerability failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    # 移除 id 字段（使用 URL 路径参数中的 Vuln_id）
+    data = vuln.dict(exclude={'id'})
+    success, msg = db.update_vulnerability_in_db(Vuln_id, data)
+    return handle_db_result(success, msg, reload_vulnerabilities_cache)
 
 @app.delete("/api/vulnerabilities/{Vuln_id}")
-def delete_vulnerability(Vuln_id: str):
+def delete_vulnerability(Vuln_id: str, db: DbReaderDep):
     """删除漏洞"""
-    try:
-        success, msg = get_db_reader().delete_vulnerability_from_db(Vuln_id)
-        if not success:
-             raise HTTPException(status_code=400, detail=msg)
-
-        reload_vulnerabilities_cache()
-
-        return {"success": True, "message": msg}
-    except Exception as e:
-        logger.error(f"Delete vulnerability failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    success, msg = db.delete_vulnerability_from_db(Vuln_id)
+    return handle_db_result(success, msg, reload_vulnerabilities_cache)
 
 @app.post("/api/open-folder")
-def open_folder(req: dict):
+def open_folder(req: OpenFolderRequest):
     """打开文件所在目录"""
-    path = req.get("path")
+    path = req.path
     
     # 如果未指定路径，尝试打开配置中的默认输出目录 (Use output/report explicitly for consistency)
     if not path or path == "default":
@@ -659,7 +769,7 @@ def merge_reports(req: MergeRequest):
         }
 
 @app.post("/api/list-reports")
-def list_reports(req: Optional[dict] = None):
+def list_reports(req: Optional[ListReportsRequest] = None):
     """列出生成的报告文件，供选择合并"""
     # req 预留用于分页或过滤
     try:
@@ -713,76 +823,67 @@ def get_icp_columns():
     return get_db_reader().get_table_columns("icp_info_Sheet1")
 
 @app.get("/api/icp-list")
-def get_icp_list():
-    """获取所有 ICP 备案信息"""
-    try:
+def list_icp_entries(db: DbReaderDep):
+    """获取所有 ICP 信息 (直接读取数据库)"""
+    return db.read_icp_raw_list()
+
+@app.delete("/api/icp-entry/{vuln_id}")
+def delete_icp_entry(vuln_id: str, db: DbReaderDep):
+    """删除指定的 ICP 信息 (根据 Vuln_id)"""
+    success, msg = db.delete_icp_entry(vuln_id)
+    if success:
         reload_icp_cache()
-        icp_infos = get_cached_icp_infos()
-        if not icp_infos:
-            return []
-        
-        # 将字典的值转换为列表返回
-        return list(icp_infos.values())
-    except Exception as e:
-        logger.error(f"Error fetching ICP list: {e}")
-        return []
+        return success_response(msg)
+    if "未找到" in msg:
+        return error_response(msg)
+    raise HTTPException(status_code=500, detail=msg)
 
 @app.post("/api/icp-entry")
-def add_icp_entry(entry: IcpEntryRequest):
-    """添加 ICP 备案信息"""
-    try:
-        success, msg = get_db_reader().add_icp_entry(entry.dict())
-        if not success:
-            raise HTTPException(status_code=400, detail=msg)
-        
-        reload_icp_cache()
-        return {"success": True, "message": msg}
-    except Exception as e:
-        logger.error(f"Add ICP entry failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+def add_icp_entry(req: IcpEntryRequest, db: DbReaderDep):
+    """新增 ICP 信息"""
+    success, msg = db.add_icp_entry(req.dict())
+    return handle_db_result(success, msg)
 
-@app.put("/api/icp-entry/{entry_id}")
-def update_icp_entry(entry_id: str, entry: IcpEntryRequest):
-    """更新 ICP 备案信息"""
-    try:
-        success, msg = get_db_reader().update_icp_entry(entry_id, entry.dict())
-        if not success:
-            raise HTTPException(status_code=400, detail=msg)
-        
-        reload_icp_cache()
-        return {"success": True, "message": msg}
-    except Exception as e:
-        logger.error(f"Update ICP entry failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.delete("/api/icp-entry/{entry_id}")
-def delete_icp_entry(entry_id: str):
-    """删除单个 ICP 备案信息"""
-    try:
-        # 复用批量删除逻辑
-        success, msg = get_db_reader().batch_delete_icp([entry_id])
-        if not success:
-            raise HTTPException(status_code=400, detail=msg)
-        
-        reload_icp_cache()
-        return {"success": True, "message": msg}
-    except Exception as e:
-        logger.error(f"Delete ICP entry failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+@app.put("/api/icp-entry/{vuln_id}")
+def update_icp_entry(vuln_id: str, req: IcpEntryRequest, db: DbReaderDep):
+    """更新 ICP 信息"""
+    success, msg = db.update_icp_entry(vuln_id, req.dict())
+    return handle_db_result(success, msg)
 
 @app.post("/api/icp-batch-delete")
-def batch_delete_icp(req: BatchDeleteRequest):
-    """批量删除 ICP 备案信息"""
+def batch_delete_icp(req: BatchDeleteRequest, db: DbReaderDep):
+    """批量删除 ICP 信息"""
+    success, msg = db.batch_delete_icp(req.ids)
+    return handle_db_result(success, msg)
+
+@app.post("/api/update-config")
+def update_config(req: UpdateConfigRequest):
+    """更新配置文件中的 supplierName"""
     try:
-        success, msg = get_db_reader().batch_delete_icp(req.ids)
-        if not success:
-            raise HTTPException(status_code=400, detail=msg)
+        # Load current YAML
+        with open(CONF_PATH, 'r', encoding='utf-8') as f:
+            current_conf = yaml.safe_load(f)
         
-        reload_icp_cache()
-        return {"success": True, "message": msg}
+        # Update value
+        current_conf['supplierName'] = req.supplierName
+        
+        # Write back to YAML
+        with open(CONF_PATH, 'w', encoding='utf-8') as f:
+            yaml.safe_dump(current_conf, f, allow_unicode=True, sort_keys=False)
+            
+        # Update memory config
+        config['supplierName'] = req.supplierName
+        
+        # 更新模板管理器的配置
+        get_template_manager().update_config(config)
+        
+        return {"success": True, "message": "配置已更新"}
     except Exception as e:
-        logger.error(f"Batch delete ICP failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to save config: {str(e)}")
+
+
+# ========== 模板相关 API ==========
+
 @app.get("/api/templates")
 def get_templates(include_details: bool = False):
     """
