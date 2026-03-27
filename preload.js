@@ -1,36 +1,53 @@
 const { contextBridge, ipcRenderer } = require('electron')
-const path = require('path')
-const fs = require('fs')
 
-// 加载共享配置
-function loadSharedConfig() {
-  // 尝试多个可能的路径
-  const possiblePaths = [
-    path.join(__dirname, 'backend', 'shared-config.json'),
-    path.join(process.resourcesPath || '', 'backend', 'shared-config.json')
-  ]
-  
-  for (const configPath of possiblePaths) {
-    try {
-      if (fs.existsSync(configPath)) {
-        return JSON.parse(fs.readFileSync(configPath, 'utf-8'))
-      }
-    } catch (e) {
-      // 继续尝试下一个路径
-    }
+function getArgValue(prefix) {
+  const arg = process.argv.find((item) => typeof item === 'string' && item.startsWith(prefix))
+  if (!arg) {
+    return ''
   }
-  return { server: { host: '127.0.0.1', port: 8000 } }
+  return arg.slice(prefix.length)
 }
 
-const sharedConfig = loadSharedConfig()
+function decodeArgValue(rawValue) {
+  if (!rawValue) {
+    return ''
+  }
+
+  try {
+    return decodeURIComponent(rawValue)
+  } catch (_e) {
+    return rawValue
+  }
+}
+
+function parseBootstrapConfig() {
+  const hostRaw = decodeArgValue(getArgValue('--app-server-host='))
+  const portRaw = Number(decodeArgValue(getArgValue('--app-server-port=')))
+  const version = decodeArgValue(getArgValue('--app-version=')) || '0.0.0'
+  const appApiToken = decodeArgValue(getArgValue('--app-api-token='))
+  const externalHostsRaw = decodeArgValue(getArgValue('--app-external-hosts='))
+
+  const host = hostRaw && hostRaw.trim() ? hostRaw.trim() : '127.0.0.1'
+  const port = Number.isInteger(portRaw) && portRaw >= 1 && portRaw <= 65535 ? portRaw : 8000
+  const externalHostAllowlist = externalHostsRaw
+    ? externalHostsRaw.split(',').map((item) => item.trim().toLowerCase()).filter(Boolean)
+    : ['github.com', 'www.github.com']
+
+  return {
+    serverHost: host,
+    serverPort: port,
+    apiBaseUrl: `http://${host}:${port}`,
+    appApiToken,
+    appVersion: version,
+    externalHostAllowlist
+  }
+}
+
+const bootstrapConfig = parseBootstrapConfig()
 
 contextBridge.exposeInMainWorld('electronAPI', {
   openExternal: (url) => ipcRenderer.invoke('open-external', url)
 })
 
 // 暴露服务器配置到渲染进程
-contextBridge.exposeInMainWorld('electronConfig', {
-  serverHost: sharedConfig.server?.host || '127.0.0.1',
-  serverPort: sharedConfig.server?.port || 8000,
-  apiBaseUrl: `http://${sharedConfig.server?.host || '127.0.0.1'}:${sharedConfig.server?.port || 8000}`
-})
+contextBridge.exposeInMainWorld('electronConfig', bootstrapConfig)

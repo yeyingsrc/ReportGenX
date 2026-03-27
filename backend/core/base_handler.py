@@ -11,8 +11,9 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional, Tuple, TypedDict
 from datetime import datetime
 from docx import Document
+from docx.document import Document as DocxDocument
 
-from .template_manager import TemplateManager, TemplateInfo
+from .handler_registry import HandlerRegistry, register_handler
 from .logger import setup_logger
 
 # 初始化日志记录器
@@ -46,7 +47,7 @@ class BaseTemplateHandler(ABC):
     4. 后处理 (postprocess)
     """
     
-    def __init__(self, template_manager: TemplateManager, template_id: str, config: Optional[Dict] = None):
+    def __init__(self, template_manager: Any, template_id: str, config: Optional[Dict[str, Any]] = None):
         """
         初始化处理器
         
@@ -58,7 +59,7 @@ class BaseTemplateHandler(ABC):
         self.template_manager = template_manager
         self.template_id = template_id
         self.config = config or {}
-        self.template_info: Optional[TemplateInfo] = template_manager.get_template(template_id)
+        self.template_info: Any = template_manager.get_template(template_id)
         
         if not self.template_info:
             raise ValueError(f"Template not found: {template_id}")
@@ -250,7 +251,7 @@ class BaseTemplateHandler(ABC):
         """获取模板文件路径"""
         return self.template_manager.get_template_file_path(self.template_id)
     
-    def build_replacements(self, data: Dict[str, Any], extra: Dict[str, Any] = None) -> Dict[str, str]:
+    def build_replacements(self, data: Dict[str, Any], extra: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
         """构建替换字典"""
         return self.template_manager.build_replacements(self.template_id, data, extra)
     
@@ -258,14 +259,14 @@ class BaseTemplateHandler(ABC):
         """生成输出路径"""
         return self.template_manager.generate_output_path(self.template_id, data, output_dir)
     
-    def load_document(self) -> Optional[Document]:
+    def load_document(self) -> Optional[DocxDocument]:
         """加载 Word 文档模板"""
         template_path = self.get_template_path()
         if template_path and os.path.exists(template_path):
             return Document(template_path)
         return None
     
-    def replace_text_in_document(self, doc: Document, replacements: Dict[str, str]) -> None:
+    def replace_text_in_document(self, doc: DocxDocument, replacements: Dict[str, str]) -> None:
         """
         替换文档中的占位符文本
         
@@ -300,7 +301,7 @@ class BaseTemplateHandler(ABC):
                 for run in paragraph.runs[1:]:
                     run.text = ""
     
-    def save_document(self, doc: Document, output_path: str) -> str:
+    def save_document(self, doc: DocxDocument, output_path: str) -> str:
         """
         保存文档，处理文件名冲突
         
@@ -327,10 +328,6 @@ class BaseTemplateHandler(ABC):
     
     def get_current_date(self, format_str: str = "%Y-%m-%d") -> str:
         """获取当前日期字符串"""
-        return datetime.now().strftime(format_str)
-    
-    def get_current_datetime(self, format_str: str = "%Y-%m-%d %H:%M:%S") -> str:
-        """获取当前日期时间字符串"""
         return datetime.now().strftime(format_str)
     
     def generate_report_id(self, prefix: str = "RPT", date_format: str = "%Y%m%d", 
@@ -463,14 +460,24 @@ class BaseTemplateHandler(ABC):
         Returns:
             完整的输出目录路径
         """
-        if sub_dir:
-            output_dir = os.path.join(base_dir, sub_dir)
-        else:
-            output_dir = base_dir
+        base_real = os.path.realpath(base_dir)
+        os.makedirs(base_real, exist_ok=True)
+
+        if not sub_dir:
+            return base_real
+
+        safe_sub_dir = self.sanitize_filename(str(sub_dir).strip().strip('. '))
+        if not safe_sub_dir:
+            safe_sub_dir = "Unknown"
+
+        output_dir = os.path.realpath(os.path.join(base_real, safe_sub_dir))
+        if os.path.commonpath([output_dir, base_real]) != base_real:
+            raise ValueError("Invalid output directory")
+
         os.makedirs(output_dir, exist_ok=True)
         return output_dir
     
-    def write_txt_log(self, output_dir: str, log_prefix: str, fields: list) -> None:
+    def write_txt_log(self, output_dir: str, log_prefix: str, fields: List[Any]) -> None:
         """
         写入 TXT 格式日志
         
@@ -551,8 +558,16 @@ class BaseTemplateHandler(ABC):
         # 创建单位子目录
         company_dir = self.create_output_dir(output_dir, unit_name)
         # 清理文件名
-        safe_filename = self.sanitize_filename(filename)
-        return os.path.join(company_dir, safe_filename)
+        safe_filename = self.sanitize_filename(str(filename).strip())
+        if not safe_filename:
+            safe_filename = f"report_{self.get_current_date()}.docx"
+
+        full_path = os.path.realpath(os.path.join(company_dir, safe_filename))
+        output_root = os.path.realpath(output_dir)
+        if os.path.commonpath([full_path, output_root]) != output_root:
+            raise ValueError("Invalid output path")
+
+        return full_path
     
     def _generate_output_path_from_template(self, data: Dict[str, Any]) -> str:
         """
@@ -588,7 +603,7 @@ class BaseTemplateHandler(ABC):
             if not processed.get(field) or processed.get(field) == 'today':
                 processed[field] = today
     
-    def _set_supplier_defaults(self, processed: Dict[str, Any], supplier_fields: List[str] = None) -> str:
+    def _set_supplier_defaults(self, processed: Dict[str, Any], supplier_fields: Optional[List[str]] = None) -> str:
         """
         设置技术支持单位相关默认值
         
@@ -622,12 +637,18 @@ class BaseTemplateHandler(ABC):
         if image_data:
             img_path = image_data if isinstance(image_data, str) else image_data.get('path', '')
             if img_path and os.path.exists(img_path):
-                img_processor.text_with_image(placeholder, img_path)
+                img_processor.replace_placeholder_with_images(placeholder, [{'path': img_path, 'description': ''}])
                 return
         # 无图片时清理占位符
         img_processor.replace_placeholder_with_images(placeholder, [])
 
-    def process_image_list(self, img_processor, placeholder: str, images: List, keyword: str = None) -> None:
+    def process_image_list(
+        self,
+        img_processor,
+        placeholder: str,
+        images: List[Any],
+        keyword: Optional[str] = None,
+    ) -> None:
         """
         处理图片列表的通用方法
         
@@ -635,105 +656,100 @@ class BaseTemplateHandler(ABC):
             img_processor: DocumentImageProcessor 实例
             placeholder: 占位符文本
             images: 图片列表（每项可以是路径字符串或包含 'path'/'description' 的字典）
-            keyword: 可选的关键字参数（用于 text_with_image）
+            keyword: 可选的关键字参数（用于占位符定位）
         """
-        if images:
-            for item in images:
-                if isinstance(item, dict):
-                    img_path = item.get('path', '')
-                    description = item.get('description', '')
-                else:
-                    img_path = str(item)
-                    description = ''
-                
-                if img_path and os.path.exists(img_path):
-                    if keyword:
-                        img_processor.text_with_image(description, img_path, keyword=keyword)
-                    else:
-                        img_processor.text_with_image(description, img_path, keyword=placeholder)
-        else:
-            # 无图片时清理占位符
-            img_processor.replace_placeholder_with_images(placeholder, [])
+        target_keyword = keyword or placeholder
+        cleanup_tokens = [placeholder]
+        if keyword and keyword != placeholder:
+            cleanup_tokens.append(keyword)
 
+        if not images:
+            # 无图片时清理占位符（兼容 keyword/placeholder 双令牌）
+            for token in cleanup_tokens:
+                img_processor.replace_placeholder_with_images(token, [])
+            return
 
-class HandlerRegistry:
-    """
-    处理器注册表
-    
-    用于注册和获取不同模板的处理器类
-    """
-    
-    _handlers: Dict[str, type] = {}
-    
-    @classmethod
-    def register(cls, template_id: str, handler_class: type) -> None:
-        """
-        注册模板处理器
-        
-        Args:
-            template_id: 模板ID
-            handler_class: 处理器类 (继承 BaseTemplateHandler)
-        """
-        if not issubclass(handler_class, BaseTemplateHandler):
-            raise TypeError(f"{handler_class} must be a subclass of BaseTemplateHandler")
-        
-        # 支持覆盖注册（解决问题 7：重复注册问题）
-        if template_id in cls._handlers:
-            from .logger import setup_logger
-            logger = setup_logger('HandlerRegistry')
-            logger.warning(f"Overwriting existing handler: {template_id}")
-        
-        cls._handlers[template_id] = handler_class
-    
-    @classmethod
-    def get_handler(cls, template_id: str, template_manager: TemplateManager, 
-                   config: Dict = None) -> Optional[BaseTemplateHandler]:
-        """
-        获取模板处理器实例
-        
-        Args:
-            template_id: 模板ID
-            template_manager: 模板管理器
-            config: 全局配置
-            
-        Returns:
-            处理器实例，如果未注册则返回 None
-        """
-        handler_class = cls._handlers.get(template_id)
-        if handler_class:
-            return handler_class(template_manager, template_id, config)
-        return None
-    
-    @classmethod
-    def has_handler(cls, template_id: str) -> bool:
-        """检查是否有注册的处理器"""
-        return template_id in cls._handlers
-    
-    @classmethod
-    def list_registered(cls) -> List[str]:
-        """列出所有已注册的模板ID"""
-        return list(cls._handlers.keys())
-    
-    @classmethod
-    def clear(cls) -> None:
-        """
-        清空所有已注册的处理器
-        
-        用于重载模板时清理注册表（解决问题 7：重复注册问题）
-        """
-        cls._handlers.clear()
+        # 统一规范图片数据，避免旧逻辑逐图插入造成状态副作用
+        normalized_images: List[Dict[str, str]] = []
+        for item in images:
+            if isinstance(item, dict):
+                img_path = item.get('path', '')
+                description = item.get('description', '') or item.get('desc', '')
+            else:
+                img_path = str(item)
+                description = ''
 
+            # 不在这里做 exists 预过滤，交给 DocumentImageProcessor 的 _resolve_path 处理相对路径
+            if img_path:
+                normalized_images.append({
+                    'path': img_path,
+                    'description': description,
+                })
 
-def register_handler(template_id: str):
-    """
-    装饰器：注册模板处理器
-    
-    Usage:
-        @register_handler("vuln_report")
-        class VulnReportHandler(BaseTemplateHandler):
-            ...
-    """
-    def decorator(handler_class: type):
-        HandlerRegistry.register(template_id, handler_class)
-        return handler_class
-    return decorator
+        # 如果过滤后没有有效图片，按无图片处理
+        if not normalized_images:
+            for token in cleanup_tokens:
+                img_processor.replace_placeholder_with_images(token, [])
+            return
+
+        # 优先处理表格占位符：直接调用 insert_images_into_cell 进行一次性多图插入
+        target_cell = None
+        target_cell_text = ''
+        for table in img_processor.doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    if target_keyword in cell.text:
+                        target_cell = cell
+                        target_cell_text = cell.text
+                        break
+                if target_cell:
+                    break
+            if target_cell:
+                break
+
+        if target_cell:
+            # 仅当单元格基本只包含占位符时，使用批量清空并重建模式
+            # 避免误清空混合文本单元格（保持旧语义）
+            compact = ''.join(target_cell_text.split())
+            is_placeholder_only_cell = compact in {
+                ''.join(placeholder.split()),
+                ''.join(target_keyword.split()),
+            }
+
+            if is_placeholder_only_cell:
+                for para in target_cell.paragraphs:
+                    if target_keyword in para.text:
+                        para.text = para.text.replace(target_keyword, '')
+                    if placeholder in para.text:
+                        para.text = para.text.replace(placeholder, '')
+                img_processor.insert_images_into_cell(target_cell, normalized_images)
+            else:
+                img_processor.replace_placeholder_with_images(target_keyword, normalized_images)
+            return
+
+        # 段落占位符场景：
+        # - 纯占位符段落：批量替换
+        # - 混合文本段落：退回逐图插入，避免删除正文
+        target_paragraph_text = None
+        for para in img_processor.doc.paragraphs:
+            if target_keyword in para.text:
+                target_paragraph_text = para.text
+                break
+
+        if target_paragraph_text is not None:
+            compact = ''.join(target_paragraph_text.split())
+            is_placeholder_only_paragraph = compact in {
+                ''.join(placeholder.split()),
+                ''.join(target_keyword.split()),
+            }
+            if is_placeholder_only_paragraph:
+                img_processor.replace_placeholder_with_images(target_keyword, normalized_images)
+            else:
+                img_processor.replace_placeholder_with_images(target_keyword, normalized_images)
+            return
+
+        # 未命中目标关键字时兜底清理，避免占位符残留
+        for token in cleanup_tokens:
+            img_processor.replace_placeholder_with_images(token, [])
+
+__all__ = ["BaseTemplateHandler", "HandlerRegistry", "register_handler"]

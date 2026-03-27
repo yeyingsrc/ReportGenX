@@ -43,7 +43,12 @@ class VulnReportHandler(BaseTemplateHandlerEnhanced):
         "信息性": "5级"
     }
     
-    def __init__(self, template_manager: TemplateManager, template_id: str, config: Optional[Dict] = None):
+    def __init__(
+        self,
+        template_manager: TemplateManager,
+        template_id: str,
+        config: Optional[Dict[str, Any]] = None,
+    ):
         super().__init__(template_manager, template_id, config)
         self.output_dir = ""  # 在 generate 时设置
     
@@ -187,3 +192,24 @@ class VulnReportHandler(BaseTemplateHandlerEnhanced):
     # - _get_log_prefix()      (从handler_config.py自动获取)
     # - _get_db_table_name()   (从handler_config.py自动获取)
     # - _build_db_record()     (从handler_config.py自动获取)
+
+
+def execute(
+    data: Dict[str, Any],
+    output_dir: str,
+    template_manager: TemplateManager,
+    config: Optional[Dict[str, Any]] = None,
+    template_id: str = "vuln_report",
+) -> Dict[str, Any]:
+    """Descriptor execution entrypoint for plugin runtime."""
+    handler = VulnReportHandler(template_manager, template_id, config)
+    return handler.run(data, output_dir)
+
+
+LEGACY_HANDLER = VulnReportHandler
+
+
+PLUGIN = {
+    "id": "vuln_report",
+    "execute": execute,
+}

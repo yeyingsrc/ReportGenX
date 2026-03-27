@@ -77,7 +77,7 @@ class DocumentImageProcessor:
         
         return run
 
-    def insert_images_into_cell(self, cell, image_list: List[Union[str, Dict]], max_width_inches: float = 5.5):
+    def insert_images_into_cell(self, cell, image_list: List[Union[str, Dict[str, str]]], max_width_inches: float = 5.5):
         """
         【新增方法】直接向指定的表格单元格插入多张图片。
         """
@@ -189,111 +189,6 @@ class DocumentImageProcessor:
                     p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
                     self._clear_paragraph_indent(p)
                     current_index += 1
-
-    def text_with_image(self, content, img_path, keyword=None):
-        """
-        【V2 升级版】关键词定位插入。
-        """
-        target_cell = None
-        target_paragraph = None
-
-        # 兼容旧逻辑：特殊占位符
-        if content == "#screenshotoffiling#":
-            keyword = "#screenshotoffiling#"
-
-        # 1. 在表格中查找
-        if keyword:
-            # 检查缓存
-            if keyword != "#screenshotoffiling#" and self.evidence_cell_cache:
-                target_cell = self.evidence_cell_cache
-
-            if not target_cell:
-                for table in self.doc.tables:
-                    for row in table.rows:
-                        for cell in row.cells:
-                            if keyword in cell.text:
-                                target_cell = cell
-                                # 清除占位符文本
-                                cell.text = cell.text.replace(keyword, "")
-                                if keyword != "#screenshotoffiling#":
-                                    self.evidence_cell_cache = cell
-                                break
-                        if target_cell: break
-                    if target_cell: break
-
-        # 2. 在段落中查找
-        if not target_cell and keyword:
-            for para in self.doc.paragraphs:
-                if keyword in para.text:
-                    target_paragraph = para
-                    # 清除占位符文本
-                    para.text = para.text.replace(keyword, "")
-                    break
-
-        # 3. 执行插入
-        if target_cell:
-            # 获取单元格宽度用于限制图片
-            cell_width_inches = 5.5 # 默认值
-            if hasattr(target_cell, 'width'):
-                # EMU to Inches: 1 inch = 914400 EMU
-                cell_width_inches = target_cell.width / 914400
-            
-            # 确保单元格有段落（如果是空的，添加一个作为起始点，或者直接添加新段落）
-            if not target_cell.paragraphs:
-                target_cell.add_paragraph()
-            
-            # 1. 插入描述段落（如果有描述）
-            if content and content != keyword:
-                # 创建新段落用于描述
-                desc_para = target_cell.add_paragraph()
-                desc_para.add_run(content)
-                desc_para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
-                self._clear_paragraph_indent(desc_para)
-            
-            # 2. 插入图片段落
-            img_para = target_cell.add_paragraph()
-            self._insert_image_run(img_para, img_path, max_width_inches=cell_width_inches)
-            img_para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-            self._clear_paragraph_indent(img_para) # 自动修复排版
-            
-            # 清理：如果单元格第一个段落是空的（通常是占位符残留或初始空段落），且后面有我们插入的内容，可以考虑移除它
-            # 但为了安全起见，我们只移除包含 keyword 的那个段落（如果它变空了）
-            # 在上面的查找逻辑中，我们已经把 keyword 替换为空字符串了
-            if target_cell.paragraphs[0].text.strip() == "":
-                 # 只有当后面还有段落时才移除第一个，避免单元格完全为空
-                 if len(target_cell.paragraphs) > 1:
-                     p = target_cell.paragraphs[0]._element
-                     p.getparent().remove(p)
-
-        elif target_paragraph:
-            # 对于普通段落插入，我们需要在 target_paragraph 之后插入新段落
-            # 获取父元素和位置
-            parent = target_paragraph._element.getparent()
-            index = parent.index(target_paragraph._element)
-            
-            current_index = index + 1
-            
-            # 1. 插入描述段落
-            if content and content != keyword:
-                new_p = OxmlElement('w:p')
-                parent.insert(current_index, new_p)
-                desc_para = Paragraph(new_p, self.doc)
-                desc_para.add_run(content)
-                desc_para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
-                self._clear_paragraph_indent(desc_para)
-                current_index += 1
-            
-            # 2. 插入图片段落
-            new_p = OxmlElement('w:p')
-            parent.insert(current_index, new_p)
-            img_para = Paragraph(new_p, self.doc)
-            self._insert_image_run(img_para, img_path, max_width_inches=6.0)
-            img_para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-            self._clear_paragraph_indent(img_para)
-            
-            # 如果原段落只包含占位符且已被清空，可以移除它
-            if target_paragraph.text.strip() == "":
-                parent.remove(target_paragraph._element)
 
     def save_image_temporarily(self, image):
         temp_file = tempfile.mkstemp(suffix='.png')[1]

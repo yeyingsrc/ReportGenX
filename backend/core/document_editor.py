@@ -28,6 +28,63 @@ class DocumentEditor:
     def __init__(self, doc):
         self.doc = doc
 
+
+    def _replace_in_runs(self, paragraph, replacements):
+        """
+        在 run 级别替换占位符，保留原有格式
+        
+        仅处理占位符完整在单个 run 中的情况。
+        返回已处理的占位符集合，未处理的需要回退到 paragraph.text 方式。
+        """
+        replaced_keys = set()
+        
+        for run in paragraph.runs:
+            if not run.text or '#' not in run.text:
+                continue
+            
+            run_text = run.text
+            for key, value in replacements.items():
+                if key in run_text:
+                    run_text = run_text.replace(key, str(value))
+                    replaced_keys.add(key)
+            
+            if run.text != run_text:
+                run.text = run_text
+        
+        return replaced_keys
+
+    def _replace_across_runs(self, paragraph, replacements):
+        """
+        处理跨 run 的占位符替换，保留第一个 run 的格式
+        """
+        if not paragraph.runs:
+            return
+        
+        # 获取第一个 run 的格式作为参考
+        first_run = paragraph.runs[0]
+        font_size = first_run.font.size
+        font_bold = first_run.font.bold
+        font_italic = first_run.font.italic
+        font_name = first_run.font.name
+        
+        # 获取完整文本并替换
+        full_text = paragraph.text
+        for key, value in replacements.items():
+            if key in full_text:
+                full_text = full_text.replace(key, str(value))
+        
+        # 清空所有 runs 的文本
+        for run in paragraph.runs:
+            run.text = ""
+        
+        # 将替换后的文本放入第一个 run，保留格式
+        first_run.text = full_text
+        first_run.font.size = font_size
+        first_run.font.bold = font_bold
+        first_run.font.italic = font_italic
+        if font_name:
+            first_run.font.name = font_name
+
     def _replace_with_color(self, paragraph, placeholder, value, color):
         """
         替换占位符并设置文字颜色
@@ -146,14 +203,20 @@ class DocumentEditor:
                 else:
                     paragraph.text = full_text
             else:
-                is_modified = False
-                for key, value in replacements.items():
-                    if key in full_text:
-                        full_text = full_text.replace(key, str(value))
-                        is_modified = True
+                # 优先尝试 run 级别替换（保留格式）
+                replaced_keys = self._replace_in_runs(paragraph, replacements)
                 
-                if is_modified:
-                    paragraph.text = full_text
+                # 检查是否还有未替换的占位符（跨run情况）
+                remaining_text = paragraph.text
+                has_remaining = False
+                for key, value in replacements.items():
+                    if key not in replaced_keys and key in remaining_text:
+                        has_remaining = True
+                        remaining_text = remaining_text.replace(key, str(value))
+                
+                # 如果有跨run的占位符，使用保留格式的替换方式
+                if has_remaining:
+                    self._replace_across_runs(paragraph, replacements)
 
         # 2. 处理页眉 (Headers)
         for section in self.doc.sections:
@@ -162,14 +225,8 @@ class DocumentEditor:
                 for paragraph in header.paragraphs:
                     if '#' not in paragraph.text:
                         continue
-                    full_text = paragraph.text
-                    is_modified = False
-                    for key, value in replacements.items():
-                        if key in full_text:
-                            full_text = full_text.replace(key, str(value))
-                            is_modified = True
-                    if is_modified:
-                        paragraph.text = full_text
+                    # 使用保留格式的替换方式
+                    self._replace_across_runs(paragraph, replacements)
                 
                 # 处理页眉中的表格
                 for table in header.tables:
@@ -178,14 +235,8 @@ class DocumentEditor:
                             if not cell.text or '#' not in cell.text:
                                 continue
                             for paragraph in cell.paragraphs:
-                                full_text = paragraph.text
-                                is_modified = False
-                                for key, value in replacements.items():
-                                    if key in full_text:
-                                        full_text = full_text.replace(key, str(value))
-                                        is_modified = True
-                                if is_modified:
-                                    paragraph.text = full_text
+                                if '#' in paragraph.text:
+                                    self._replace_across_runs(paragraph, replacements)
 
         # 3. 处理表格 (Tables)
         for table in self.doc.tables:
@@ -215,7 +266,7 @@ class DocumentEditor:
                                 is_modified = True
                         
                         if is_modified:
-                            paragraph.text = full_text
+                            self._replace_across_runs(paragraph, replacements)
 
     def insert_toc_at_placeholder(self, placeholder: str = "#toc#", toc_title: str = "目  录") -> bool:
         """

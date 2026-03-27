@@ -8,11 +8,45 @@ window.AppAPI = {
             || "http://127.0.0.1:8000";
     },
 
+    _extractErrorMessage(errorData, status) {
+        return errorData.detail || errorData.message || errorData.error || `API Error: ${status}`;
+    },
+
+    _appendTokenToUrl(url) {
+        const token = window.electronConfig && window.electronConfig.appApiToken;
+        if (!token) {
+            return url;
+        }
+        const separator = url.includes('?') ? '&' : '?';
+        return `${url}${separator}app_token=${encodeURIComponent(token)}`;
+    },
+
+    _buildAuthHeaders() {
+        const headers = {};
+        if (window.electronConfig && window.electronConfig.appApiToken) {
+            headers['X-App-Token'] = window.electronConfig.appApiToken;
+        }
+        return headers;
+    },
+
+    async _verifyTokenBinding() {
+        try {
+            const res = await fetch(`${this.BASE_URL}/api/health-auth`, {
+                method: 'GET',
+                headers: this._buildAuthHeaders()
+            });
+            return res.ok;
+        } catch (_e) {
+            return false;
+        }
+    },
+
     async _request(endpoint, method = 'GET', body = null) {
         const options = {
             method,
-            headers: {}
+            headers: this._buildAuthHeaders()
         };
+
         if (body) {
             if (body instanceof FormData) {
                 options.body = body;
@@ -26,10 +60,20 @@ window.AppAPI = {
             const res = await fetch(`${this.BASE_URL}${endpoint}`, options);
             if (!res.ok) {
                 const errorData = await res.json().catch(() => ({}));
-                throw new Error(errorData.detail || errorData.message || `API Error: ${res.status}`);
+                const message = this._extractErrorMessage(errorData, res.status);
+                if (res.status === 403 && /invalid application token/i.test(message)) {
+                    const tokenBound = await this._verifyTokenBinding();
+                    if (!tokenBound) {
+                        throw new Error('检测到后端令牌不一致，请完全退出并重启应用（关闭旧后端进程后再启动）。');
+                    }
+                }
+                throw new Error(message);
             }
             return await res.json();
         } catch (e) {
+            if (e instanceof TypeError) {
+                throw new Error(`无法连接后端服务（${this.BASE_URL}）`);
+            }
             throw e;
         }
     },
@@ -44,9 +88,21 @@ window.AppAPI = {
     async getConfig() {
         return this._request('/api/config');
     },
+
+    async getVersionInfo() {
+        return this._request('/api/version');
+    },
     
     async updateConfig(data) {
         return this._request('/api/update-config', 'POST', data);
+    },
+
+    async getPluginRuntimeConfig() {
+        return this._request('/api/plugin-runtime-config');
+    },
+
+    async updatePluginRuntimeConfig(data) {
+        return this._request('/api/plugin-runtime-config', 'POST', data);
     },
 
     // URL 处理
@@ -68,7 +124,7 @@ window.AppAPI = {
 
     async backupDatabase() {
         // Blob downloading is special, so we might need custom logic or just window.open
-        window.open(`${this.BASE_URL}/api/backup-db`);
+        window.open(this._appendTokenToUrl(`${this.BASE_URL}/api/backup-db`));
     },
 
     // --- Vulnerabilities ---
@@ -149,7 +205,7 @@ window.AppAPI = {
         
         // Export is a download, usually via GET
         exportUrl(id) {
-            return `${window.AppAPI.BASE_URL}/api/templates/${id}/export`;
+            return window.AppAPI._appendTokenToUrl(`${window.AppAPI.BASE_URL}/api/templates/${id}/export`);
         },
         
         async save(data) {

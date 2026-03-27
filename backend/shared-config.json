@@ -2,5 +2,37 @@
   "server": {
     "host": "127.0.0.1",
     "port": 8000
+  },
+  "app": {
+    "version": "0.18.2"
+  },
+  "security": {
+    "external_protocols": [
+      "https:"
+    ],
+    "external_hosts": [
+      "github.com",
+      "www.github.com"
+    ]
+  },
+  "paths": {
+    "open_folder_allowlist": [
+      "output/report",
+      "output/temp",
+      "output"
+    ]
+  },
+  "plugin_runtime": {
+    "mode": "descriptor",
+    "use_legacy_core_alias": false,
+    "force_legacy_templates": [],
+    "subprocess_strategy": "hybrid",
+    "subprocess_timeout_seconds": 120,
+    "isolated_enabled_templates": [],
+    "isolated_disabled_templates": [],
+    "isolated_rollout_percent": 0,
+    "isolated_template_rollout": {},
+    "isolated_fallback_mode": "hybrid",
+    "metrics_emit_every_n": 50
   }
 }

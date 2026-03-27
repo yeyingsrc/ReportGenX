@@ -3,7 +3,6 @@
 
 window.addEventListener('DOMContentLoaded', async () => {
     // --- Init Modules ---
-    if (window.AppImage) AppImage.init();
     if (window.AppVulnManager) AppVulnManager.init();
     if (window.AppToolbox) AppToolbox.init();
     if (window.AppFormRenderer) AppFormRenderer.init();
@@ -12,6 +11,49 @@ window.addEventListener('DOMContentLoaded', async () => {
     // --- Global Refs ---
     const statusDot = document.getElementById('api-status-dot');
     const statusText = document.getElementById('api-status-text');
+    const versionWarningBanner = document.getElementById('version-warning-banner');
+
+    function normalizeVersion(raw) {
+        if (!raw) return '';
+        const text = String(raw).trim();
+        return text.toLowerCase().startsWith('v') ? text.slice(1) : text;
+    }
+
+    function showVersionWarning(message) {
+        if (!versionWarningBanner) return;
+        versionWarningBanner.textContent = message;
+        versionWarningBanner.style.display = 'block';
+    }
+
+    function clearVersionWarning() {
+        if (!versionWarningBanner) return;
+        versionWarningBanner.textContent = '';
+        versionWarningBanner.style.display = 'none';
+    }
+
+    async function checkVersionConsistency(configVersion) {
+        try {
+            const versionInfo = await AppAPI.getVersionInfo();
+            const backendVersion = normalizeVersion(versionInfo.backend_version || configVersion);
+            const sharedVersion = normalizeVersion(versionInfo.shared_version || '');
+            const electronVersion = normalizeVersion(window.electronConfig && window.electronConfig.appVersion);
+
+            if (electronVersion && backendVersion && electronVersion !== backendVersion) {
+                showVersionWarning(`版本不一致：桌面端 ${electronVersion} / 后端 ${backendVersion}。建议重新构建并发布。`);
+                return;
+            }
+
+            if (sharedVersion && backendVersion && sharedVersion !== backendVersion) {
+                showVersionWarning(`版本不一致：shared-config ${sharedVersion} / backend ${backendVersion}。请先执行 npm run sync-version。`);
+                return;
+            }
+
+            clearVersionWarning();
+        } catch (e) {
+            console.warn('Version consistency check failed:', e);
+            showVersionWarning('版本一致性检查失败，请确认 /api/version 可访问。');
+        }
+    }
 
     // --- Init App ---
     async function initApp() {
@@ -31,6 +73,8 @@ window.addEventListener('DOMContentLoaded', async () => {
             const versionEl = document.getElementById('version-info');
             if (versionEl) versionEl.innerText = config.version || '';
 
+            await checkVersionConsistency(config.version || '');
+
             // 同步漏洞列表到 VulnManager
             if (window.AppVulnManager && config.vulnerabilities_list) {
                 window.AppVulnManager.VULN_LIST = config.vulnerabilities_list;
@@ -43,6 +87,7 @@ window.addEventListener('DOMContentLoaded', async () => {
 
         } catch (e) {
             console.error("Init failed", e);
+            clearVersionWarning();
             statusDot.classList.remove('connected');
             statusDot.classList.add('error');
             statusText.innerText = "Connecting...";

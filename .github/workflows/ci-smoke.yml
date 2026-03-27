@@ -1,0 +1,50 @@
+name: CI Smoke
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+
+jobs:
+  backend-and-electron-smoke:
+    name: Backend + Electron Smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install Node dependencies
+        run: npm install --no-fund --no-audit
+
+      - name: Install Linux display deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+
+      - name: Run backend unit tests
+        run: npm run test --silent
+
+      - name: Run Electron smoke test
+        run: xvfb-run -a npm run test:e2e:smoke --silent

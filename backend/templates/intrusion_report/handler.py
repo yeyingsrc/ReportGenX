@@ -52,7 +52,12 @@ class IntrusionReportHandler(BaseTemplateHandlerEnhanced):
     # 定义处理器类型 - 自动从配置中获取日志字段、前缀、数据库表等
     HANDLER_TYPE = 'intrusion_report'
     
-    def __init__(self, template_manager, template_id: str, config: Optional[Dict] = None):
+    def __init__(
+        self,
+        template_manager: Any,
+        template_id: str,
+        config: Optional[Dict[str, Any]] = None,
+    ):
         super().__init__(template_manager, template_id, config)
     
     def preprocess(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -133,7 +138,7 @@ class IntrusionReportHandler(BaseTemplateHandlerEnhanced):
             logger.error(f"Failed to get vulnerability name: {e}")
             return ''
     
-    def generate(self, data: Dict[str, Any], output_dir: str) -> tuple:
+    def generate(self, data: Dict[str, Any], output_dir: str) -> tuple[bool, str, str]:
         """
         生成入侵痕迹报告
         
@@ -214,3 +219,24 @@ class IntrusionReportHandler(BaseTemplateHandlerEnhanced):
     # - _get_log_prefix()      (从handler_config.py自动获取)
     # - _get_db_table_name()   (从handler_config.py自动获取)
     # - _build_db_record()     (从handler_config.py自动获取)
+
+
+def execute(
+    data: Dict[str, Any],
+    output_dir: str,
+    template_manager: Any,
+    config: Optional[Dict[str, Any]] = None,
+    template_id: str = "intrusion_report",
+) -> Dict[str, Any]:
+    """Descriptor execution entrypoint for plugin runtime."""
+    handler = IntrusionReportHandler(template_manager, template_id, config)
+    return handler.run(data, output_dir)
+
+
+LEGACY_HANDLER = IntrusionReportHandler
+
+
+PLUGIN = {
+    "id": "intrusion_report",
+    "execute": execute,
+}

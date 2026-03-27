@@ -92,7 +92,8 @@ def validate_path_safety(path: str, base_dir: str) -> bool:
 ALLOWED_FIELD_TYPES = {
     'text', 'select', 'textarea', 'date', 'image', 'image_list', 
     'searchable_select', 'checkbox', 'checkbox_group', 'number',
-    'target_list', 'vuln_list', 'tester_info_list'
+    'target_list', 'vuln_list', 'tester_info_list',
+    'array', 'server_type_group', 'db_screenshot_group'
 }
 
 # 允许的数据源类型
@@ -119,9 +120,9 @@ class FieldDefinition(BaseModel):
     readonly: bool = Field(default=False, description="是否只读")
     computed: bool = Field(default=False, description="是否计算字段")
     compute_from: str = Field(default="", description="计算来源字段")
-    compute_rule: Dict = Field(default_factory=dict, description="计算规则")
+    compute_rule: Dict[str, Any] = Field(default_factory=dict, description="计算规则")
     on_change: str = Field(default="", description="值变化时触发的行为ID")
-    validation: Dict = Field(default_factory=dict, description="验证规则")
+    validation: Dict[str, Any] = Field(default_factory=dict, description="验证规则")
     auto_generate: bool = Field(default=False, description="是否自动生成")
     auto_generate_rule: str = Field(default="", description="自动生成规则")
     auto_fill_from: str = Field(default="", description="自动填充来源")
@@ -139,10 +140,10 @@ class FieldDefinition(BaseModel):
     value_field: str = Field(default="", description="值字段")
     editable_config: bool = Field(default=False, description="是否可编辑配置")
     save_to_config: bool = Field(default=False, description="是否保存到配置")
-    presets: Dict = Field(default_factory=dict, description="预设值")
-    show_if: Dict = Field(default_factory=dict, description="条件显示逻辑")
+    presets: Dict[str, Any] = Field(default_factory=dict, description="预设值")
+    show_if: Dict[str, Any] = Field(default_factory=dict, description="条件显示逻辑")
     transform: str = Field(default="", description="数据转换规则")
-    columns: List[Dict] = Field(default_factory=list, description="列定义(复杂类型)")
+    columns: List[Dict[str, Any]] = Field(default_factory=list, description="列定义(复杂类型)")
     
     model_config = {"extra": "allow"}  # 允许额外字段，保持向后兼容
     
@@ -195,10 +196,10 @@ class BehaviorAction(BaseModel):
     """行为动作"""
     type: str
     endpoint: str = ""
-    params: Dict = Field(default_factory=dict)
-    result_mapping: Dict = Field(default_factory=dict)
+    params: Dict[str, Any] = Field(default_factory=dict)
+    result_mapping: Dict[str, Any] = Field(default_factory=dict)
     target: str = ""
-    rules: Dict = Field(default_factory=dict)
+    rules: Dict[str, Any] = Field(default_factory=dict)
     expression: str = ""  # compute 类型的表达式
     
     @field_validator('type')
@@ -247,8 +248,10 @@ class TemplateInfo(BaseModel):
     data_sources: List[DataSourceDef] = Field(default_factory=list)
     behaviors: List[Behavior] = Field(default_factory=list)
     validation_rules: List[ValidationRule] = Field(default_factory=list)
-    output_config: Dict = Field(default_factory=dict)
-    preview_config: Dict = Field(default_factory=dict)
+    output_config: Dict[str, Any] = Field(default_factory=dict)
+    preview_config: Dict[str, Any] = Field(default_factory=dict)
+    dependent_fields: Dict[str, Any] = Field(default_factory=dict)
+    summary_configs: Dict[str, Any] = Field(default_factory=dict)
     
     @field_validator('id')
     @classmethod
@@ -273,7 +276,7 @@ class TemplateManager:
     # 排除的目录：以 _ 或 . 开头的目录，以及特定系统目录
     EXCLUDED_DIRS = {'_deleted', '_backup', '__pycache__', '.git', '.vscode', '.idea'}
     
-    def __init__(self, templates_dir: str, config: Optional[Dict] = None):
+    def __init__(self, templates_dir: str, config: Optional[Dict[str, Any]] = None):
         """
         初始化模板管理器
         
@@ -422,7 +425,9 @@ class TemplateManager:
                     behaviors=behaviors,
                     validation_rules=validation_rules,
                     output_config=schema.get('output', {}),
-                    preview_config=schema.get('preview', {})
+                    preview_config=schema.get('preview', {}),
+                    dependent_fields=schema.get('dependent_fields', {}),
+                    summary_configs=schema.get('summary_configs', {})
                 )
             except Exception as e:
                 logger.error(f"Failed to create TemplateInfo for {template_id}: {e}")
@@ -713,7 +718,8 @@ class TemplateManager:
             "value_field": field.value_field,
             "editable_config": field.editable_config,
             "save_to_config": field.save_to_config,
-            "presets": field.presets
+            "presets": field.presets,
+            "columns": field.columns
         }
     
     def _serialize_field_group(self, group: FieldGroup) -> Dict[str, Any]:
@@ -819,7 +825,9 @@ class TemplateManager:
                 ]
             },
             "output": template.output_config,
-            "preview": template.preview_config
+            "preview": template.preview_config,
+            "dependent_fields": template.dependent_fields,
+            "summary_configs": template.summary_configs
         }
     
     def get_template_file_path(self, template_id: str) -> Optional[str]:
@@ -962,9 +970,11 @@ class TemplateManager:
             if value is None:
                 value = field_def.default if field_def.default != 'today' else ''
             
-            # 特殊处理
+            # 特殊处理：跳过图片类型和复杂类型，由专门的处理器处理
+            if field_def.type in ('image', 'image_list', 'db_screenshot_group', 'server_type_group'):
+                continue
             if isinstance(value, list):
-                # 图片列表等复杂类型，跳过文本替换，由专门的处理器处理
+                # 图片列表等复杂类型，跳过文本替换
                 continue
             else:
                 replacements[key] = str(value) if value is not None else ""
@@ -1255,7 +1265,7 @@ class TemplateManager:
             logger.error(f"Failed to delete template {template_id}: {str(e)}")
             return False, f"删除失败: {str(e)}"
     
-    def update_config(self, config: Dict):
+    def update_config(self, config: Dict[str, Any]):
         """更新全局配置"""
         self.config = config
     

@@ -1,12 +1,16 @@
 name: Release Build
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   workflow_dispatch:
   push:
     tags:
       - "v*.*.*"
 
-permissions: write-all
+permissions:
+  contents: write
 
 jobs:
   check_tag_version:
@@ -14,14 +18,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
       - name: Check version
         run: |
           TAG_VERSION=${GITHUB_REF#refs/tags/v}
-          PACKAGE_VERSION=$(grep '"version":' package.json | head -1 | awk -F: '{ print $2 }' | sed 's/[", ]//g')
-          if [ "$TAG_VERSION" != "$PACKAGE_VERSION" ]; then
-            echo "Error: Tag version ($TAG_VERSION) does not match package.json version ($PACKAGE_VERSION)"
-            exit 1
-          fi
+          node scripts/check-version-sync.js --tag "$TAG_VERSION"
 
   build:
     name: Build (${{ matrix.platform }}-${{ matrix.arch }})
@@ -60,12 +64,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller==6.16.0
 
       - name: Build Python Backend
         working-directory: ./backend
         run: |
           pyinstaller --noconfirm api.spec
+
+      - name: Rollback drill (packaged backend)
+        run: python backend/scripts/plugin_runtime_rollback_drill.py
 
       - name: Ad-hoc sign backend executable (macOS)
         if: runner.os == 'macOS'
@@ -88,7 +95,7 @@ jobs:
           node-version: 24
 
       - name: Install Node dependencies
-        run: npm install
+        run: npm install --no-fund --no-audit
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -96,10 +103,85 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libfuse2 rpm
 
-      - name: Build Electron App
+      - name: Build Electron App (Windows with optional signing)
+        if: runner.os == 'Windows'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WINDOWS_SIGNING_CERT_PRESENT: ${{ (secrets.CSC_LINK != '' || secrets.WIN_CSC_LINK != '') && 'true' || 'false' }}
+          WINDOWS_SIGNING_PASSWORD_PRESENT: ${{ (secrets.CSC_KEY_PASSWORD != '' || secrets.WIN_CSC_KEY_PASSWORD != '') && 'true' || 'false' }}
+          WINDOWS_SIGNING_ENABLED: ${{ (secrets.CSC_LINK != '' || secrets.WIN_CSC_LINK != '') && (secrets.CSC_KEY_PASSWORD != '' || secrets.WIN_CSC_KEY_PASSWORD != '') && 'true' || 'false' }}
+          CSC_LINK: ${{ (secrets.CSC_LINK != '' || secrets.WIN_CSC_LINK != '') && (secrets.CSC_KEY_PASSWORD != '' || secrets.WIN_CSC_KEY_PASSWORD != '') && (secrets.CSC_LINK || secrets.WIN_CSC_LINK) || '' }}
+          CSC_KEY_PASSWORD: ${{ (secrets.CSC_LINK != '' || secrets.WIN_CSC_LINK != '') && (secrets.CSC_KEY_PASSWORD != '' || secrets.WIN_CSC_KEY_PASSWORD != '') && (secrets.CSC_KEY_PASSWORD || secrets.WIN_CSC_KEY_PASSWORD) || '' }}
+        run: npm run dist -- ${{ matrix.args }} --publish never
+
+      - name: Build Electron App (non-Windows)
+        if: runner.os != 'Windows'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run dist -- ${{ matrix.args }} --publish never
+
+      - name: Warn unsigned Windows artifacts (no cert configured)
+        if: runner.os == 'Windows'
+        env:
+          WINDOWS_SIGNING_CERT_PRESENT: ${{ (secrets.CSC_LINK != '' || secrets.WIN_CSC_LINK != '') && 'true' || 'false' }}
+          WINDOWS_SIGNING_PASSWORD_PRESENT: ${{ (secrets.CSC_KEY_PASSWORD != '' || secrets.WIN_CSC_KEY_PASSWORD != '') && 'true' || 'false' }}
+          WINDOWS_SIGNING_ENABLED: ${{ (secrets.CSC_LINK != '' || secrets.WIN_CSC_LINK != '') && (secrets.CSC_KEY_PASSWORD != '' || secrets.WIN_CSC_KEY_PASSWORD != '') && 'true' || 'false' }}
+        run: |
+          if ($env:WINDOWS_SIGNING_ENABLED -eq 'true') {
+            Write-Host "Windows code signing certificate detected; signed build path enabled."
+            exit 0
+          }
+
+          if ($env:WINDOWS_SIGNING_CERT_PRESENT -eq 'true' -and $env:WINDOWS_SIGNING_PASSWORD_PRESENT -ne 'true') {
+            Write-Host "::warning::Windows signing certificate detected but password is missing (CSC_KEY_PASSWORD/WIN_CSC_KEY_PASSWORD)."
+            Write-Host "::warning::Falling back to unsigned Windows artifacts to avoid signing-time build failures."
+            exit 0
+          }
+
+          Write-Host "::warning::Windows code signing certificate is not configured (CSC_LINK/WIN_CSC_LINK)."
+          Write-Host "::warning::Release artifacts will be unsigned and may be blocked by SmartScreen/enterprise policies."
+        shell: pwsh
+
+      - name: Verify Windows signatures (when cert configured)
+        if: runner.os == 'Windows'
+        env:
+          WINDOWS_SIGNING_ENABLED: ${{ (secrets.CSC_LINK != '' || secrets.WIN_CSC_LINK != '') && (secrets.CSC_KEY_PASSWORD != '' || secrets.WIN_CSC_KEY_PASSWORD != '') && 'true' || 'false' }}
+        run: |
+          if ($env:WINDOWS_SIGNING_ENABLED -ne 'true') {
+            Write-Host "Skipping Windows signature verification because no signing certificate is configured."
+            exit 0
+          }
+
+          $patterns = @(
+            "dist\\ReportGenX-Setup-*.exe",
+            "dist\\win-unpacked\\ReportGenX.exe",
+            "dist\\win-unpacked\\resources\\backend\\dist\\api\\api.exe",
+            "dist\\win-arm64-unpacked\\ReportGenX.exe",
+            "dist\\win-arm64-unpacked\\resources\\backend\\dist\\api\\api.exe"
+          )
+
+          $files = @()
+          foreach ($pattern in $patterns) {
+            $matched = @(Get-ChildItem -Path $pattern -File -ErrorAction SilentlyContinue)
+            if ($matched.Count -eq 0) {
+              throw "Expected artifact pattern not found: $pattern"
+            }
+            $files += $matched
+          }
+
+          $failed = $false
+          foreach ($file in $files | Sort-Object -Property FullName -Unique) {
+            $signature = Get-AuthenticodeSignature -FilePath $file.FullName
+            Write-Host "$($file.FullName) => $($signature.Status)"
+            if ($signature.Status -ne 'Valid') {
+              $failed = $true
+            }
+          }
+
+          if ($failed) {
+            throw "Windows signature verification failed."
+          }
+        shell: pwsh
 
       - name: Upload to Release
         if: startsWith(github.ref, 'refs/tags/')

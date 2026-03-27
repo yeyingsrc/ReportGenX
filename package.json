@@ -1,6 +1,6 @@
 {
   "name": "report-electron-app",
-  "version": "0.17.10",
+  "version": "0.18.2",
   "description": "Electron version of ReportGenX",
   "repository": {
     "type": "git",
@@ -10,6 +10,10 @@
   "scripts": {
     "start": "electron .",
     "sync-version": "node scripts/sync-version.js",
+    "check-version": "node scripts/check-version-sync.js",
+    "test:e2e:smoke": "node scripts/e2e-smoke.js",
+    "test:backend": "python -m unittest discover -s backend/tests -p \"test_*.py\"",
+    "test": "npm run test:backend",
     "prestart": "npm run sync-version",
     "predist": "npm run sync-version",
     "dist": "electron-builder",
@@ -24,6 +28,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "shared-config-utils.js",
       "src/**/*",
       "package.json"
     ],
@@ -111,6 +116,7 @@
   "license": "ISC",
   "devDependencies": {
     "electron": "^39.5.1",
-    "electron-builder": "^26.4.0"
+    "electron-builder": "^26.4.0",
+    "playwright": "^1.58.2"
   }
 }

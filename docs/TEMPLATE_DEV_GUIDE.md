@@ -1,8 +1,8 @@
 # 多模板系统开发指南
 
 > ReportGenX 多模板架构开发文档  
-> 版本: 1.0.3  
-> 更新日期: 2026-02-13
+> 版本: 1.0.4  
+> 更新日期: 2026-03-27
 
 ---
 
@@ -61,9 +61,9 @@
 
 | 组件 | 文件位置 | 职责 |
 |------|----------|------|
-| TemplateManager | `core/template_manager.py` | 加载/解析模板 Schema，管理版本 |
-| BaseTemplateHandler | `core/base_handler.py` | 抽象基类，定义生成流程 |
-| HandlerRegistry | `core/base_handler.py` | Handler 注册与查找 |
+| TemplateManager | `backend/core/template_manager.py` | 加载/解析模板 Schema，管理版本 |
+| BaseTemplateHandler | `backend/core/base_handler.py`（模板侧可从 `core.base_handler` 导入） | 抽象基类，定义生成流程 |
+| HandlerRegistry | `backend/core/handler_registry.py` | Handler 注册与查找 |
 | AppFormRenderer | `src/js/form-renderer.js` | 动态表单渲染 |
 
 ---
@@ -143,24 +143,26 @@ class YourTemplateHandler(BaseTemplateHandler):
 ```python
 from fastapi import APIRouter
 
-# 定义模板专属路由
-router = APIRouter(
-    prefix="/api/templates/your_template",
-    tags=["your_template"]
-)
+# 定义模板专属路由（不要手写 /api 前缀）
+router = APIRouter(tags=["your_template"])
 
 @router.get("/custom-data")
 def get_custom_data():
     return {"data": "some data"}
 ```
 
+系统会自动挂载为：`/api/plugin/{template_id}/custom-data`。
+
 #### 5️⃣ 热加载模板
 
 无需重启服务，调用热加载接口即可生效：
 
 ```bash
-curl -X POST http://localhost:8000/api/templates/reload
+curl -X POST http://127.0.0.1:8000/api/templates/reload \
+  -H "X-App-Token: <APP_API_TOKEN>"
 ```
+
+如果后端是手动启动且未设置 `APP_API_TOKEN`，可省略该 Header。
 
 > **注意**：如果添加了自定义 API 路由，需要重启应用才能生效。仅修改 Handler 逻辑或 Schema 支持热加载。
 

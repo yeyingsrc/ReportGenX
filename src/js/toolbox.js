@@ -6,6 +6,7 @@ window.AppToolbox = {
     ICP_LIST: [],
     ICP_SELECTED_IDS: [],
     crud: null,  // CRUD管理器
+    runtimeConfigCache: null,
 
     init() {
         // 初始化CRUD管理器
@@ -29,11 +30,15 @@ window.AppToolbox = {
         const tabItems = document.querySelectorAll('.toolbox-nav-item');
         tabItems.forEach(item => {
             item.addEventListener('click', () => {
-                tabItems.forEach(i => i.classList.remove('active'));
+                tabItems.forEach((i) => {
+                    i.classList.remove('active');
+                });
                 item.classList.add('active');
                 
                 const targetId = item.getAttribute('data-target');
-                document.querySelectorAll('.toolbox-view').forEach(view => view.classList.remove('active'));
+                document.querySelectorAll('.toolbox-view').forEach((view) => {
+                    view.classList.remove('active');
+                });
                 document.getElementById(targetId).classList.add('active');
 
                 if (targetId === 'view-merge') {
@@ -51,6 +56,9 @@ window.AppToolbox = {
                         window.AppTemplateManager.loadTemplateListForManagement();
                     }
                 }
+                if (targetId === 'view-settings') {
+                    this.initRuntimeSettingsView();
+                }
             });
         });
 
@@ -64,9 +72,11 @@ window.AppToolbox = {
             }
         });
 
-        document.querySelectorAll('.close-toolbox').forEach(el => el.onclick = () => {
-             this.modal.style.display = "none";
-             document.body.style.overflow = ''; // 恢复背景滚动
+        document.querySelectorAll('.close-toolbox').forEach((el) => {
+            el.onclick = () => {
+                this.modal.style.display = "none";
+                document.body.style.overflow = ''; // 恢复背景滚动
+            };
         });
 
         const btnRefresh = document.getElementById('btn-refresh-reports');
@@ -80,6 +90,33 @@ window.AppToolbox = {
 
         const btnBackup = document.getElementById('btn-backup-db');
         if(btnBackup) btnBackup.addEventListener('click', () => this.downloadBackup());
+
+        const btnRuntimeRefresh = document.getElementById('btn-runtime-refresh');
+        if (btnRuntimeRefresh) btnRuntimeRefresh.addEventListener('click', () => this.loadRuntimeConfig());
+
+        const btnRuntimeSave = document.getElementById('btn-runtime-save');
+        if (btnRuntimeSave) btnRuntimeSave.addEventListener('click', () => this.saveRuntimeConfig());
+
+        document.querySelectorAll('.runtime-rollout-preset').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const rolloutInput = document.getElementById('runtime-isolated-rollout');
+                if (!rolloutInput) {
+                    return;
+                }
+                rolloutInput.value = btn.getAttribute('data-rollout') || '0';
+            });
+        });
+
+        const btnRuntimeTemplateRolloutExample = document.getElementById('runtime-template-rollout-example');
+        if (btnRuntimeTemplateRolloutExample) {
+            btnRuntimeTemplateRolloutExample.addEventListener('click', () => {
+                const target = document.getElementById('runtime-template-rollout');
+                if (!target) {
+                    return;
+                }
+                target.value = JSON.stringify({ Attack_Defense: 100, penetration_test: 20 }, null, 2);
+            });
+        }
 
         const checkAll = document.getElementById('check-all-reports');
         if(checkAll) {
@@ -317,6 +354,102 @@ window.AppToolbox = {
         } catch(e) {
             console.error(e);
             AppUtils.showToast("操作失败", "error");
+        }
+    },
+
+    initRuntimeSettingsView() {
+        const panel = document.getElementById('runtime-settings-panel');
+        if (!panel) {
+            return;
+        }
+        panel.style.display = 'block';
+        this.loadRuntimeConfig();
+    },
+
+    parseCsvList(text) {
+        if (!text || typeof text !== 'string') {
+            return [];
+        }
+
+        return text
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean);
+    },
+
+    fillRuntimeConfigForm(pluginRuntime) {
+        const runtime = pluginRuntime || {};
+        const setValue = (id, value) => {
+            const el = document.getElementById(id);
+            if (el) el.value = value;
+        };
+
+        setValue('runtime-mode', runtime.mode || 'descriptor');
+        setValue('runtime-isolated-fallback', runtime.isolated_fallback_mode || 'hybrid');
+        setValue('runtime-subprocess-strategy', runtime.subprocess_strategy || 'hybrid');
+        setValue('runtime-subprocess-timeout', runtime.subprocess_timeout_seconds ?? 120);
+        setValue('runtime-isolated-rollout', runtime.isolated_rollout_percent ?? 0);
+        setValue('runtime-metrics-every', runtime.metrics_emit_every_n ?? 50);
+        setValue('runtime-force-legacy', (runtime.force_legacy_templates || []).join(', '));
+        setValue('runtime-enabled-templates', (runtime.isolated_enabled_templates || []).join(', '));
+        setValue('runtime-disabled-templates', (runtime.isolated_disabled_templates || []).join(', '));
+        setValue('runtime-template-rollout', JSON.stringify(runtime.isolated_template_rollout || {}, null, 2));
+    },
+
+    async loadRuntimeConfig() {
+        try {
+            const result = await window.AppAPI.getPluginRuntimeConfig();
+            const pluginRuntime = result && result.plugin_runtime ? result.plugin_runtime : {};
+            this.runtimeConfigCache = pluginRuntime;
+            this.fillRuntimeConfigForm(pluginRuntime);
+        } catch (e) {
+            AppUtils.showToast(`加载运行时配置失败: ${e.message}`, 'error');
+        }
+    },
+
+    collectRuntimeConfigForm() {
+        const getValue = (id) => {
+            const el = document.getElementById(id);
+            return el ? el.value : '';
+        };
+
+        const templateRolloutRaw = getValue('runtime-template-rollout').trim();
+        let isolatedTemplateRollout = {};
+        if (templateRolloutRaw) {
+            try {
+                isolatedTemplateRollout = JSON.parse(templateRolloutRaw);
+            } catch (_e) {
+                throw new Error('模板级灰度覆盖 JSON 格式无效');
+            }
+        }
+
+        return {
+            mode: getValue('runtime-mode').trim(),
+            subprocess_strategy: getValue('runtime-subprocess-strategy').trim(),
+            subprocess_timeout_seconds: Number(getValue('runtime-subprocess-timeout')),
+            isolated_rollout_percent: Number(getValue('runtime-isolated-rollout')),
+            isolated_fallback_mode: getValue('runtime-isolated-fallback').trim(),
+            metrics_emit_every_n: Number(getValue('runtime-metrics-every')),
+            force_legacy_templates: this.parseCsvList(getValue('runtime-force-legacy')),
+            isolated_enabled_templates: this.parseCsvList(getValue('runtime-enabled-templates')),
+            isolated_disabled_templates: this.parseCsvList(getValue('runtime-disabled-templates')),
+            isolated_template_rollout: isolatedTemplateRollout,
+        };
+    },
+
+    async saveRuntimeConfig() {
+        try {
+            const payload = this.collectRuntimeConfigForm();
+            const result = await window.AppAPI.updatePluginRuntimeConfig(payload);
+            if (result && result.success) {
+                this.runtimeConfigCache = result.plugin_runtime || payload;
+                this.fillRuntimeConfigForm(this.runtimeConfigCache);
+                AppUtils.showToast('运行时配置已保存', 'success');
+                return;
+            }
+            AppUtils.showToast('保存失败', 'error');
+        } catch (e) {
+            AppUtils.showToast(`保存失败: ${e.message}`, 'error');
         }
     },
 

@@ -118,6 +118,7 @@ class TableProcessor:
         data_rows: List[Dict[str, Any]],
         row_builder_func: Callable,
         keep_header_rows: int = 1,
+        clear_indent: bool = False,
         logger_instance=None
     ) -> bool:
         """
@@ -129,22 +130,11 @@ class TableProcessor:
             data_rows: List of data dicts to populate
             row_builder_func: Function(row, data_item) -> None to build each row
             keep_header_rows: Number of header rows to preserve (default 1)
+            clear_indent: Auto clear paragraph indent for all cells (default False)
             logger_instance: Logger for debug output
             
         Returns:
             True if table found and populated, False otherwise
-            
-        Example:
-            def build_row(row, info):
-                row.cells[0].text = info.get('name', '')
-                row.cells[1].text = info.get('email', '')
-            
-            TableProcessor.populate_table(
-                doc, 
-                'Contact Information',
-                contacts,
-                build_row
-            )
         """
         # Find table by header text
         table = None
@@ -166,6 +156,13 @@ class TableProcessor:
         for data_item in data_rows:
             row = table.add_row()
             row_builder_func(row, data_item)
+            
+            # Auto clear indent if requested
+            if clear_indent:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        if para.paragraph_format.first_line_indent:
+                            para.paragraph_format.first_line_indent = None
         
         if logger_instance:
             logger_instance.info(f"Populated table '{table_header_text}' with {len(data_rows)} rows")

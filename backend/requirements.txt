@@ -4,9 +4,7 @@ pydantic
 python-multipart
 pyyaml
 tldextract
-# pandas
 python-docx
 openpyxl
 docxcompose
 Pillow
-# matplotlib

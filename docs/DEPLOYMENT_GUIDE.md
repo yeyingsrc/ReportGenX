@@ -1,151 +1,162 @@
-# 📦 部署与运维指南
+# 部署与运维指南
 
-> 更新日期: 2026-02-13
+> 更新日期：2026-03-27
 
-## 1. 部署环境要求
+## 1. 部署模式
 
-### 硬件要求
-- **CPU**: 2 核及以上
-- **内存**: 4GB 及以上
-- **硬盘**: 至少 500MB 可用空间（用于存储生成的报告和日志）
+ReportGenX 当前推荐 **Electron 单机模式**（桌面应用 + 本地 FastAPI）。
 
-### 软件要求 (Web 模式)
-- **操作系统**: Windows (推荐 Server 2016+), Linux (Ubuntu 20.04+, CentOS 7+)
-- **Python**: 3.9 及以上 (仅源码部署需要)
-- **端口**: 默认占用 `8000` (可配置)
+- 目标场景：单机离线/内网终端使用
+- 运行链路：Electron 主进程拉起本地后端，渲染层通过 `http://127.0.0.1:<port>` 调用 API
+
+> 说明：文档中的“Web 服务化”只作为扩展方案参考。当前默认安全链路依赖 Electron 注入 `X-App-Token`，不适合作为通用开放 Web 服务直接暴露。
 
 ---
 
-## 2. 部署模式详解
+## 2. 环境要求
 
-### A. 移动/桌面单机模式 (Electron)
-适用于安全服务人员各自分发使用，无需中心服务器。
-*   **分发方式**: 直接分发打包好的文件夹或安装包。
-*   **运行**:双击 `ReportGenX.exe` (主程序)。
-*   **数据**: 数据保存在本地 `data/` 目录。
+### 2.1 运行要求（桌面端）
 
-### B. 团队协作模式 (Web Service)
-适用于团队内网共享，集中管理模板和可访问性。
+- CPU：2 核及以上
+- 内存：4GB 及以上
+- 磁盘：至少 500MB 可用空间（报告与日志）
 
-**步骤：**
-1.  将 `app/` 目录上传至服务器（确保包含 `api.exe` 或源码）。
-2.  修改 `shared-config.json`，将 host 改为 `0.0.0.0` 以允许外部访问。
-    ```json
-    {
-      "server": {
-        "host": "0.0.0.0",
-        "port": 8000
-      }
-    }
-    ```
-3.  **启动服务**:
-    *   **Windows**: 在终端运行 `./api.exe`
-    *   **Linux (源码运行)**:
-        ```bash
-        # 安装依赖
-        pip install -r requirements.txt
-        # 启动后台服务
-        nohup python backend/api.py > output.log 2>&1 &
-        ```
-4.  **访问**: 打开浏览器访问 `http://<服务器IP>:8000`。
+### 2.2 开发要求
+
+- Node.js >= 16
+- Python >= 3.9
 
 ---
 
-## 3. 配置详解
+## 3. 本地开发运行
 
-### 全局服务配置 (`shared-config.json`)
-控制服务器监听地址与端口。仅影响 API 服务启动参数，不影响业务逻辑。
+1. 安装前端依赖
 
-| 参数 | 说明 | 默认值 |
-| :--- | :--- | :--- |
-| `host` | 监听 IP。`127.0.0.1` 仅本机访问，`0.0.0.0` 允许公网/局域网访问 | `127.0.0.1` |
-| `port` | 监听端口 | `8000` |
-
-### 业务配置 (`config.yaml`)
-控制报告生成行为、下拉选项、默认值等。
-
-*   **数据库路径**: `vul_or_icp: data/combined.db`
-*   **版本号**: `version: V0.17.7`
-*   **风险等级定义**: `risk_levels` (修改此处可调整报告中的风险颜色和文案)
-*   **预设选项**: 可自定义 `operating_systems`, `hazard_types`, `industries` 等下拉列表内容。
-
----
-
-## 4. 安全说明 (Security Notice)
-
-为了保障系统安全，部署时请注意以下事项：
-
-### 1. 模板安全
-*   **白名单机制**: 系统内置了依赖包白名单，仅允许加载安全的 Python 库。
-*   **来源审计**: 请勿随意加载来源不明的模板文件夹，虽然系统有沙箱机制，但恶意代码仍可能造成风险。
-*   **路由隔离**: 所有插件接口均被强制隔离在 `/api/plugin/` 下，防止覆盖系统核心 API。
-
-### 2. 文件上传
-*   **格式限制**: 图片上传接口已加固，仅支持 `png, jpg, jpeg, gif` 等安全格式。
-*   **大小限制**: 单个文件上传限制为 10MB。
-
-### 3. 数据安全
-*   **SQL 注入防御**: 核心数据库操作已启用严格的参数化查询和标识符校验。
-*   **备份建议**: 建议定期使用工具箱的“数据备份”功能导出 `.db` 文件。
-
-## 5. 目录与文件维护
-
-打包后的应用结构如下：
-
-```
-app/
-├── api.exe                    # 后端服务主程序
-├── shared-config.json         # [关键] 网络监听配置
-├── config.yaml                # [关键] 业务配置
-├── data/                      # 数据持久化目录
-│   └── combined.db            # 核心知识库 (SQLite)
-├── templates/                 # 模板插件目录
-│   ├── vuln_report/
-│   │   ├── schema.yaml
-│   │   ├── template.docx
-│   │   └── handler.py
-│   └── ...
-├── src/                       # 前端静态资源 (Web模式专用)
-├── output/                    # 运行时产物
-│   ├── report/                # 生成的报告归档
-│   ├── temp/                  # 临时上传文件
-│   └── logs/                  # 系统运行日志
-└── ...
+```bash
+npm install
 ```
 
-## 6. 运维操作
+2. 安装后端依赖
 
-### 添加新模板
-无需重新编译，支持热插拔。
+```bash
+cd backend
+pip install -r requirements.txt
+```
 
-1.  将新模板文件夹复制到 `templates/` 目录。
-    *   必须包含: `schema.yaml`, `handler.py`
-    *   可选: `template.docx`
-2.  **热加载**:
-    *   方法 A: 重启服务/应用。
-    *   方法 B: 调用 API `POST /api/templates/reload` (无需重启)。
+3. 启动后端（可选，Electron 启动时也会尝试拉起）
 
-### 备份与恢复
-建议定期备份以下目录：
-*   `data/`: 包含自定义的漏洞库数据。
-*   `config.yaml`: 包含自定义的业务配置。
-*   `templates/`: 包含所有自定义的报告模板。
+```bash
+cd backend
+uvicorn api:app --host 127.0.0.1 --port 8000 --reload
+```
 
-### 日志排查
-所有运行日志位于 `output/logs/` 目录下。
-*   `api.log`: 记录接口调用和常规报错。
-*   `report_generation.log`: 专门记录报告生成过程中的详细调试信息。
+4. 启动 Electron
 
-### 常见问题 (FAQ)
+```bash
+npm run start
+```
 
-**Q: 模板加载失败，提示 `InvalidTemplateIdError`？**
-A: 检查 `templates/` 下的文件夹名称。只能包含字母、数字、下划线，且不能以数字开头。
+---
 
-**Q: Web 模式下无法上传图片？**
-A: 检查 `output/temp/` 目录是否有写入权限。Linux 环境需执行 `chmod -R 755 output/`。
+## 4. 打包发布
 
-**Q: 修改了 config.yaml 没生效？**
-A: 业务配置目前是在服务启动时加载的。修改 `config.yaml` 后必须**重启服务**。
+### 4.1 构建 Python 后端可执行
 
-**Q: 热加载能更新路由吗？**
-A: 不能。如果模板的 `handler.py` 中定义了新的 API 路由（例如 `@router.get(...)`），必须重启服务才能生效。如果不涉及新路由仅修改逻辑，可以使用热加载。
+```bash
+pyinstaller --noconfirm backend/api.spec
+```
+
+### 4.2 构建 Electron 安装包
+
+```bash
+npm run dist
+```
+
+常用目标：
+
+- Windows x64：`npm run dist -- --win --x64`
+- macOS ARM：`npm run dist -- --mac --arm64`
+
+---
+
+## 5. 运行时安全边界（必须知晓）
+
+## 5.1 Token 策略
+
+后端 `app_token_middleware` 当前规则：
+
+- `/api/*` 的 `POST/PUT/PATCH/DELETE` 默认要求 `X-App-Token`
+- 受保护 GET：
+  - `/api/backup-db`
+  - `/api/health-auth`
+  - `/api/templates/{template_id}/export`
+- `GET /api/health` 不鉴权（基础存活探针）
+
+## 5.2 启动握手
+
+Electron 主进程会在开窗前调用 `GET /api/health-auth`（带 `X-App-Token`）：
+
+- 返回 200：继续启动
+- 返回 403：视为“端口已有旧后端实例且 token 不匹配”，直接退出并提示
+
+这用于防止“前端连到旧后端”引发随机 `Invalid application token`。
+
+## 5.3 runtime 配置接口
+
+- `GET /api/plugin-runtime-config`：读取
+- `POST /api/plugin-runtime-config`：更新（token 保护）
+
+说明：当前不使用管理员会话认证（无 `admin-session`/`X-Admin-Session`）。
+
+---
+
+## 6. CI 与发布前检查
+
+## 6.1 本地发布前检查
+
+```bash
+npm run test
+npm run test:e2e:smoke
+```
+
+## 6.2 CI 冒烟
+
+仓库提供 `.github/workflows/ci-smoke.yml`，在 Ubuntu 上执行：
+
+1. 安装 Python/Node 依赖
+2. 运行后端单元测试
+3. 通过 `xvfb-run` 执行 Electron 冒烟
+
+---
+
+## 7. 运维操作建议
+
+## 7.1 模板更新
+
+1. 将模板目录放入 `backend/templates/`
+2. 调用 `POST /api/templates/reload` 热加载
+3. 若新增模板自定义路由，重启应用后生效
+
+## 7.2 备份建议
+
+建议定期备份：
+
+- `backend/data/combined.db`
+- `backend/config.yaml`
+- `backend/shared-config.json`
+- `backend/templates/`
+
+## 7.3 常见故障
+
+- `Invalid application token`：通常是旧后端残留；完全退出应用后重启
+- 启动即失败且提示 token mismatch：结束占用端口的旧后端进程后重启
+- runtime 配置保存 403：检查渲染层是否注入 `window.electronConfig.appApiToken`
+
+---
+
+## 8. 参考文档
+
+- `docs/RUNTIME_OPERATIONS_RUNBOOK.md`
+- `docs/ARCHITECTURE_LAYER_FLOW_ANALYSIS.md`
+- `docs/TEMPLATE_DEV_GUIDE.md`
+- `docs/TEMPLATE_QUICK_START.md`

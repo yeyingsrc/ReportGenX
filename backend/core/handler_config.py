@@ -126,6 +126,33 @@ class HandlerConfig:
         }
     }
     
+    # Attack Defense (护网报告) Handler Config
+    ATTACK_DEFENSE = {
+        'log_prefix': 'attack_defense',
+        'log_fields': [
+            'target_name',
+            'supplier_name',
+            'report_date',
+            'internet_vuln_count',
+            'intranet_vuln_count',
+            'controlled_server_count',
+            'db_count'
+        ],
+        'db_table': 'attack_defense_report',
+        'db_fields': {
+            'target_name': 'target_name',
+            'report_title': 'report_title',
+            'supplier_name': 'supplier_name',
+            'report_date': 'report_date',
+            'internet_vuln_count': 'internet_vuln_count',
+            'intranet_vuln_count': 'intranet_vuln_count',
+            'controlled_server_count': 'controlled_server_count',
+            'db_count': 'db_count',
+            'vuln_count_total': 'vuln_count_total',
+            'output_path': 'output_path'
+        }
+    }
+    
     @classmethod
     def get_config(cls, handler_type: str) -> Dict[str, Any]:
         """Get configuration for a specific handler type"""
@@ -133,5 +160,6 @@ class HandlerConfig:
             'vuln_report': cls.VULN_REPORT,
             'penetration_test': cls.PENETRATION_TEST,
             'intrusion_report': cls.INTRUSION_REPORT,
+            'attack_defense': cls.ATTACK_DEFENSE,
         }
         return configs.get(handler_type, {})

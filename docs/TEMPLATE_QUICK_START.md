@@ -1,6 +1,6 @@
 # 🚀 模板开发快速入门
 
-> 更新日期: 2026-02-13
+> 更新日期: 2026-03-27
 
 本指南将带你快速创建一个自定义报告模板。
 
@@ -37,7 +37,7 @@ fields:
   - key: author
     label: 报告作者
     type: text
-    default: "管理员"
+    default: "报告员"
     order: 2
 
 # 输出配置
@@ -82,8 +82,11 @@ class MyFirstTemplateHandler(BaseTemplateHandler):
 
 **方法 B：使用命令行**
 ```bash
-curl -X POST http://localhost:8000/api/templates/reload
+curl -X POST http://127.0.0.1:8000/api/templates/reload \
+  -H "X-App-Token: <APP_API_TOKEN>"
 ```
+
+如果你是手动启动后端且未设置 `APP_API_TOKEN`，可省略该 Header。
 
 ## 6. 测试生成
 
@@ -100,15 +103,14 @@ curl -X POST http://localhost:8000/api/templates/reload
 ```python
 from fastapi import APIRouter
 
-router = APIRouter(
-    prefix="/api/templates/my_first_template",
-    tags=["my_first_template"]
-)
+router = APIRouter(tags=["my_first_template"])
 
 @router.get("/hello")
 def hello():
     return {"message": "Hello World"}
 ```
+
+该接口会自动挂载到：`/api/plugin/my_first_template/hello`。
 
 > **注意**：添加路由后需要**重启应用**才能生效。
 

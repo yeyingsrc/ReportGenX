@@ -4,8 +4,15 @@ block_cipher = None
 
 # 导入必要的模块
 import os
-import sys
+from PyInstaller.building.api import COLLECT, EXE, PYZ
+from PyInstaller.building.build_main import Analysis
 from PyInstaller.utils.hooks import collect_data_files
+
+# SPECPATH is injected by PyInstaller when executing this spec file.
+# Fallback keeps static analyzers/editor diagnostics working.
+SPEC_DIR = globals().get('SPECPATH') or os.path.dirname(os.path.abspath(__file__))
+HOOKS_DIR = os.path.join(SPEC_DIR, 'hooks')
+RUNTIME_HOOK = os.path.join(HOOKS_DIR, 'runtime_hook_docx.py')
 
 # 收集第三方库的数据文件
 docxcompose_data = collect_data_files('docxcompose')
@@ -16,23 +23,44 @@ app_datas = [
     *docx_data,
 ]
 
-a = Analysis(['api.py'],
-             pathex=['.'],
+a = Analysis([os.path.join(SPEC_DIR, 'api.py')],
+             pathex=[SPEC_DIR],
              binaries=[],
              datas=app_datas,  # 包含所有必需的数据文件
-             hiddenimports=[
-                 # Core modules used by dynamic templates
-                 'core.document_editor',
-                 'core.document_image_processor',
-                 'core.exceptions',
-                 'core.report_merger',
-                 'core.base_handler',
-                 'core.data_reader_db',
-                 'core.logger',
-                 'core.template_manager',
+              hiddenimports=[
+                  # Core modules used by dynamic templates
+                  'core.document_editor',
+                  'core.document_image_processor',
+                  'core.exceptions',
+                  'core.report_merger',
+                  'core.base_handler',
+                  'core.data_reader_db',
+                  'core.handler_config',
+                  'core.handler_registry',
+                  'core.handler_utils',
+                  'core.logger',
+                  'core.summary_generator',
+                  'core.template_manager',
 
-                 # PIL/Pillow modules (used by Penetration_Test handler)
-                 'PIL',
+                  # Canonical backend.core namespace (used by api alias bridge)
+                  'backend.core',
+                  'backend.core.base_handler',
+                  'backend.core.data_reader_db',
+                  'backend.core.document_editor',
+                  'backend.core.document_image_processor',
+                  'backend.core.exceptions',
+                  'backend.core.handler_config',
+                  'backend.core.handler_registry',
+                  'backend.core.handler_utils',
+                  'backend.core.logger',
+                  'backend.core.report_merger',
+                  'backend.core.summary_generator',
+                  'backend.core.template_manager',
+                  'backend.plugin_host',
+                  'backend.plugin_host.runtime',
+
+                  # PIL/Pillow modules (used by Penetration_Test handler)
+                  'PIL',
                  'PIL.Image',
                  'PIL.ImageDraw',
                  'PIL.ImageFont',
@@ -49,8 +77,8 @@ a = Analysis(['api.py'],
                  'uvicorn.lifespan',
                  'uvicorn.lifespan.on',
              ],
-             hookspath=['hooks'],
-             runtime_hooks=['hooks/runtime_hook_docx.py'],
+             hookspath=[HOOKS_DIR],
+             runtime_hooks=[RUNTIME_HOOK],
              excludes=[
                  # 排除模板模块（templates/ 目录应在外部）
                  'templates',

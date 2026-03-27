@@ -6,20 +6,21 @@ import socket
 import sys
 import uuid
 import io
+import importlib
 import json
 import zipfile
 import subprocess
 import traceback
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Annotated, Any, Dict, List, Optional, Tuple
-from urllib.parse import urlparse
+from typing import Annotated, Any, Optional
+from urllib.parse import quote, urlparse
 
 import tldextract
 import uvicorn
 import yaml
 from PIL import Image
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -27,15 +28,74 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+API_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(API_DIR)
+while PROJECT_ROOT in sys.path:
+    sys.path.remove(PROJECT_ROOT)
+sys.path.insert(0, PROJECT_ROOT)
 
-from core.base_handler import HandlerRegistry
-from core.data_reader_db import DbDataReader
-from core.logger import setup_logger
-from core.template_manager import TemplateManager
-from core.report_merger import ReportMerger
+import backend.core as backend_core_package
+from backend.core.data_reader_db import DbDataReader
+from backend.core.handler_registry import HandlerRegistry
+from backend.core.logger import setup_logger
+from backend.core.report_merger import ReportMerger
+from backend.core.template_manager import TemplateManager
+
+_LEGACY_CORE_ALIAS_MODULES = (
+    "base_handler",
+    "data_reader_db",
+    "document_editor",
+    "document_image_processor",
+    "exceptions",
+    "handler_config",
+    "handler_registry",
+    "handler_utils",
+    "logger",
+    "report_merger",
+    "summary_generator",
+    "template_manager",
+)
 
 logger = setup_logger('API')
+
+
+def _ensure_legacy_core_import_aliases(
+    use_alias_fallback: bool = False,
+    fail_on_missing_core: bool = True,
+) -> None:
+    """Enable opt-in legacy aliasing only when top-level ``core`` package is unavailable."""
+
+    try:
+        importlib.import_module("core")
+        logger.info("Detected top-level core SDK package; skip legacy core aliasing")
+        return
+    except Exception:
+        if not use_alias_fallback:
+            message = "Top-level core SDK not found and legacy alias fallback is disabled"
+            if fail_on_missing_core:
+                raise RuntimeError(
+                    f"{message}. Set plugin_runtime.use_legacy_core_alias=true for rollback."
+                )
+            logger.warning(message)
+            return
+
+    logger.warning("Top-level core SDK unavailable; enabling legacy core alias fallback")
+    sys.modules.setdefault("core", backend_core_package)
+
+    for module_name in _LEGACY_CORE_ALIAS_MODULES:
+        backend_module_name = f"backend.core.{module_name}"
+        try:
+            module_obj = importlib.import_module(backend_module_name)
+        except Exception as exc:
+            logger.warning(
+                "Failed to alias %s as core.%s: %s",
+                backend_module_name,
+                module_name,
+                exc,
+            )
+            continue
+
+        sys.modules.setdefault(f"core.{module_name}", module_obj)
 
 if getattr(sys, 'frozen', False):
     # PyInstaller 打包后的路径处理
@@ -43,9 +103,11 @@ if getattr(sys, 'frozen', False):
     # 需要往上跳两级到 resources/backend/
     EXE_PATH = sys.executable
     EXE_DIR = os.path.dirname(EXE_PATH)  # dist/api/
-    BASE_DIR = os.path.dirname(os.path.dirname(EXE_DIR))  # backend/
+    base_dir = os.path.dirname(os.path.dirname(EXE_DIR))  # backend/
 else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    base_dir = API_DIR
+
+BASE_DIR = base_dir
 
 CONF_PATH = os.path.join(BASE_DIR, "config.yaml")
 SHARED_CONF_PATH = os.path.join(BASE_DIR, "shared-config.json")
@@ -56,15 +118,145 @@ def load_config():
     with open(CONF_PATH, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
 
+def _normalize_shared_config(raw: dict[str, Any]) -> dict[str, Any]:
+    server = raw.get("server", {}) if isinstance(raw, dict) else {}
+    app_meta = raw.get("app", {}) if isinstance(raw, dict) else {}
+    security = raw.get("security", {}) if isinstance(raw, dict) else {}
+    paths = raw.get("paths", {}) if isinstance(raw, dict) else {}
+    plugin_runtime = raw.get("plugin_runtime", {}) if isinstance(raw, dict) else {}
+
+    host = server.get("host", "127.0.0.1")
+    if host == "localhost":
+        host = "127.0.0.1"
+
+    port = server.get("port", 8000)
+    if not isinstance(port, int) or port < 1 or port > 65535:
+        port = 8000
+
+    runtime_mode = str(plugin_runtime.get("mode", "descriptor")).lower()
+    if runtime_mode not in {"legacy", "hybrid", "descriptor", "isolated"}:
+        runtime_mode = "descriptor"
+
+    use_legacy_core_alias = plugin_runtime.get("use_legacy_core_alias", False)
+    if not isinstance(use_legacy_core_alias, bool):
+        use_legacy_core_alias = False
+
+    force_legacy_templates = plugin_runtime.get("force_legacy_templates", [])
+    if not isinstance(force_legacy_templates, list):
+        force_legacy_templates = []
+
+    subprocess_strategy = str(plugin_runtime.get("subprocess_strategy", "hybrid")).lower()
+    if subprocess_strategy not in {"descriptor", "legacy", "hybrid"}:
+        subprocess_strategy = "hybrid"
+
+    try:
+        subprocess_timeout_seconds = float(plugin_runtime.get("subprocess_timeout_seconds", 120))
+    except (TypeError, ValueError):
+        subprocess_timeout_seconds = 120.0
+    if subprocess_timeout_seconds <= 0:
+        subprocess_timeout_seconds = 120.0
+    if subprocess_timeout_seconds > 600:
+        subprocess_timeout_seconds = 600.0
+
+    def _normalize_template_list(value: Any) -> list[str]:
+        if not isinstance(value, list):
+            return []
+        return [str(item) for item in value if item]
+
+    def _normalize_percent(value: Any, default: float) -> float:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            parsed = default
+        if parsed < 0:
+            return 0.0
+        if parsed > 100:
+            return 100.0
+        return parsed
+
+    isolated_enabled_templates = _normalize_template_list(plugin_runtime.get("isolated_enabled_templates", []))
+    isolated_disabled_templates = _normalize_template_list(plugin_runtime.get("isolated_disabled_templates", []))
+    isolated_rollout_percent = _normalize_percent(plugin_runtime.get("isolated_rollout_percent", 0), 0.0)
+
+    template_rollout_raw = plugin_runtime.get("isolated_template_rollout", {})
+    isolated_template_rollout: dict[str, float] = {}
+    if isinstance(template_rollout_raw, dict):
+        for key, value in template_rollout_raw.items():
+            template_key = str(key).strip()
+            if not template_key:
+                continue
+            isolated_template_rollout[template_key] = _normalize_percent(value, 0.0)
+
+    isolated_fallback_mode = str(plugin_runtime.get("isolated_fallback_mode", "hybrid")).lower()
+    if isolated_fallback_mode not in {"legacy", "hybrid", "descriptor"}:
+        isolated_fallback_mode = "hybrid"
+
+    metrics_emit_every_n = plugin_runtime.get("metrics_emit_every_n", 50)
+    if not isinstance(metrics_emit_every_n, int) or metrics_emit_every_n <= 0:
+        metrics_emit_every_n = 50
+    if metrics_emit_every_n > 10000:
+        metrics_emit_every_n = 10000
+
+    return {
+        "server": {
+            "host": host if isinstance(host, str) and host else "127.0.0.1",
+            "port": port,
+        },
+        "app": {
+            "version": str(app_meta.get("version", "")),
+        },
+        "security": {
+            "external_protocols": security.get("external_protocols", ["https:"]),
+            "external_hosts": security.get("external_hosts", ["github.com", "www.github.com"]),
+        },
+        "paths": {
+            "open_folder_allowlist": paths.get(
+                "open_folder_allowlist",
+                [os.path.join("output", "report"), os.path.join("output", "temp"), "output"],
+            )
+        },
+        "plugin_runtime": {
+            "mode": runtime_mode,
+            "use_legacy_core_alias": use_legacy_core_alias,
+            "force_legacy_templates": [str(item) for item in force_legacy_templates if item],
+            "subprocess_strategy": subprocess_strategy,
+            "subprocess_timeout_seconds": subprocess_timeout_seconds,
+            "isolated_enabled_templates": isolated_enabled_templates,
+            "isolated_disabled_templates": isolated_disabled_templates,
+            "isolated_rollout_percent": isolated_rollout_percent,
+            "isolated_template_rollout": isolated_template_rollout,
+            "isolated_fallback_mode": isolated_fallback_mode,
+            "metrics_emit_every_n": metrics_emit_every_n,
+        }
+    }
+
+
 def load_shared_config():
-    """加载共享配置（服务器端口等）"""
+    """加载共享配置（服务器端口、安全策略、路径白名单等）。"""
     if os.path.exists(SHARED_CONF_PATH):
         with open(SHARED_CONF_PATH, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return {"server": {"host": "127.0.0.1", "port": 8000}}
+            return _normalize_shared_config(json.load(f))
+
+    return _normalize_shared_config({})
+
+
+def persist_shared_config(next_config: dict[str, Any]) -> dict[str, Any]:
+    """Normalize and persist shared runtime config to disk."""
+    normalized = _normalize_shared_config(next_config)
+    with open(SHARED_CONF_PATH, 'w', encoding='utf-8') as f:
+        json.dump(normalized, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    return normalized
 
 config = load_config()
 shared_config = load_shared_config()
+APP_API_TOKEN = str(os.getenv("APP_API_TOKEN", "") or "")
+_ensure_legacy_core_import_aliases(
+    use_alias_fallback=bool(
+        shared_config.get("plugin_runtime", {}).get("use_legacy_core_alias", False)
+    ),
+    fail_on_missing_core=True,
+)
 
 # 延迟初始化：提升 macOS 启动速度
 # 这些变量在首次访问时才会加载数据
@@ -119,6 +311,25 @@ def reload_icp_cache():
     return _cached_icp_infos
 
 
+def _assert_template_handler_alignment(template_manager: TemplateManager) -> None:
+    """校验模板与处理器注册一致性，避免运行期出现缺失处理器。"""
+    template_ids = set(template_manager.template_ids)
+    registered_ids = set(HandlerRegistry.list_registered())
+
+    missing_handlers = sorted(template_ids - registered_ids)
+    extra_handlers = sorted(registered_ids - template_ids)
+
+    if extra_handlers:
+        logger.warning(f"Detected extra handlers without matching templates: {extra_handlers}")
+
+    if missing_handlers:
+        logger.critical(f"Template handlers missing for templates: {missing_handlers}")
+        raise RuntimeError(
+            "Template handler registry mismatch. "
+            f"Missing handlers for templates: {', '.join(missing_handlers)}"
+        )
+
+
 def get_template_manager():
     """
     延迟初始化模板管理器
@@ -129,6 +340,7 @@ def get_template_manager():
     global _template_manager
     if _template_manager is None:
         _template_manager = TemplateManager(TEMPLATES_DIR, config)
+        _assert_template_handler_alignment(_template_manager)
         
         # 动态挂载模板路由
         for template_id, router in _template_manager.get_template_routers().items():
@@ -153,32 +365,35 @@ DbReaderDep = Annotated[DbDataReader, Depends(get_db_reader)]
 TemplateManagerDep = Annotated[TemplateManager, Depends(get_template_manager)]
 
 
-def get_vulnerabilities_cache() -> Tuple[List, Dict]:
+def get_vulnerabilities_cache() -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
     """依赖注入：获取漏洞缓存"""
     return get_cached_vulnerabilities()
 
 
-def get_icp_cache() -> Dict:
+def get_icp_cache() -> dict[str, dict[str, Any]]:
     """依赖注入：获取 ICP 缓存"""
     return get_cached_icp_infos()
 
 
-VulnCacheDep = Annotated[Tuple[List, Dict], Depends(get_vulnerabilities_cache)]
-IcpCacheDep = Annotated[Dict, Depends(get_icp_cache)]
+VulnCacheDep = Annotated[
+    tuple[list[dict[str, Any]], dict[str, dict[str, Any]]],
+    Depends(get_vulnerabilities_cache),
+]
+IcpCacheDep = Annotated[dict[str, dict[str, Any]], Depends(get_icp_cache)]
 
 
 # ========== 通用响应辅助函数 ==========
-def success_response(message: str = "操作成功", **kwargs) -> Dict[str, Any]:
+def success_response(message: str = "操作成功", **kwargs) -> dict[str, Any]:
     """生成成功响应"""
     return {"success": True, "message": message, **kwargs}
 
 
-def error_response(message: str, detail: Optional[str] = None) -> Dict[str, Any]:
+def error_response(message: str, detail: Optional[str] = None) -> dict[str, Any]:
     """生成错误响应"""
     return {"success": False, "message": message, "detail": detail}
 
 
-def handle_db_result(success: bool, msg: str, reload_cache_fn=None) -> Dict[str, Any]:
+def handle_db_result(success: bool, msg: str, reload_cache_fn=None) -> dict[str, Any]:
     """
     统一处理数据库操作结果
     
@@ -194,18 +409,77 @@ def handle_db_result(success: bool, msg: str, reload_cache_fn=None) -> Dict[str,
     raise HTTPException(status_code=400, detail=msg)
 
 
-# 为了兼容性，保留全局变量别名
-# 注意：直接赋值的地方需要使用 reload_xxx_cache() 函数
+def _normalize_version_string(raw: Any) -> str:
+    """归一化版本号：去除前缀 V/v 并返回字符串。"""
+    if raw is None:
+        return ""
+    version = str(raw).strip()
+    return version[1:] if version.lower().startswith("v") else version
+
+
+def _raise_internal_error(action: str, exc: Exception) -> None:
+    """统一兜底异常日志与 HTTP 500。"""
+    logger.error(f"{action} failed: {traceback.format_exc()}")
+    raise HTTPException(status_code=500, detail=f"{action} failed") from exc
+
+
+def _build_error_payload(message: str, detail: Optional[str] = None, **extra: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "success": False,
+        "message": message,
+        "error": message,
+        "detail": detail,
+    }
+    if extra:
+        payload.update(extra)
+    return payload
+
+
+def _error_response(status_code: int, message: str, detail: Optional[str] = None, **extra: Any) -> JSONResponse:
+    return JSONResponse(status_code=status_code, content=_build_error_payload(message, detail, **extra))
+
+
+def _is_token_protected_get_path(path: str) -> bool:
+    if path in {"/api/backup-db", "/api/health-auth"}:
+        return True
+
+    # 模板导出是敏感读取（可获取模板源码/资源）
+    if re.match(r"^/api/templates/[^/]+/export$", path):
+        return True
+
+    return False
+
+
+def _requires_app_token(method: str, path: str) -> bool:
+    """Only protect sensitive API requests; keep read-only GET APIs open by default."""
+    normalized_method = (method or "").upper()
+    if normalized_method == "OPTIONS":
+        return False
+
+    if normalized_method in {"POST", "PUT", "PATCH", "DELETE"} and path.startswith("/api/"):
+        return True
+
+    if normalized_method == "GET" and _is_token_protected_get_path(path):
+        return True
+
+    return False
 
 
 class ConfigResponse(BaseModel):
     """返回给前端的初始化配置信息"""
     version: str
     supplierName: str
-    hazard_types: List[str]
-    unit_types: List[str]
-    industries: List[str]
-    vulnerabilities_list: List[Dict[str, str]]
+    hazard_types: list[str]
+    unit_types: list[str]
+    industries: list[str]
+    vulnerabilities_list: list[dict[str, str]]
+
+
+class VersionResponse(BaseModel):
+    """版本一致性检查响应"""
+    backend_version: str
+    shared_version: str
+    is_synced: bool
 
 
 class UrlProcessRequest(BaseModel):
@@ -215,7 +489,7 @@ class UrlProcessResponse(BaseModel):
     url: str
     domain: str
     ip: str
-    icp_info: Optional[Dict[str, Any]] = None
+    icp_info: Optional[dict[str, Any]] = None
 
 class CustomVulnRequest(BaseModel):
     id: Optional[str] = None  # 编辑时使用，新增时为空
@@ -236,47 +510,8 @@ class UploadImageResponse(BaseModel):
     file_path: str
     url: str
 
-class VulnEvidence(BaseModel):
-    path: str
-    description: str = ""
-
-class ReportRequest(BaseModel):
-    """生成报告所需的所有字段"""
-    vulnerability_id: str
-    hazard_type: str
-    hazard_level: str
-    alert_level: str
-    vul_name: str
-    unit_type: str
-    industry: str
-    
-    url: str
-    website_name: str
-    domain: str
-    ip: str
-    icp_number: str
-    discovery_date: str
-    
-    vul_description: str
-    vul_harm: str
-    repair_suggestion: str
-    remarks: str
-    
-    city: str
-    region: str
-    unit_name: str
-
-    vuln_evidence_images: List[VulnEvidence] = []
-    icp_screenshot_path: Optional[str] = None
-
-class ReportResponse(BaseModel):
-    success: bool
-    report_path: str
-    download_url: str
-    message: str
-
 class MergeRequest(BaseModel):
-    files: List[str]
+    files: list[str]
     output_filename: Optional[str] = "Merged_Report.docx"
 
 class MergeResponse(BaseModel):
@@ -288,12 +523,6 @@ class MergeResponse(BaseModel):
 class DeleteFileRequest(BaseModel):
     path: str
 
-class IcpModel(BaseModel):
-    domain: str
-    unitName: str
-    mainLicence: str
-    updateTime: Optional[str] = ""
-
 class IcpEntryRequest(BaseModel):
     unitName: Optional[str] = ""
     natureName: Optional[str] = ""
@@ -303,10 +532,24 @@ class IcpEntryRequest(BaseModel):
     updateRecordTime: Optional[str] = ""
 
 class BatchDeleteRequest(BaseModel):
-    ids: List[str]
+    ids: list[str]
 
 class UpdateConfigRequest(BaseModel):
     supplierName: str
+
+
+class PluginRuntimeConfigRequest(BaseModel):
+    mode: Optional[str] = None
+    use_legacy_core_alias: Optional[bool] = None
+    force_legacy_templates: Optional[list[str]] = None
+    subprocess_strategy: Optional[str] = None
+    subprocess_timeout_seconds: Optional[float] = None
+    isolated_enabled_templates: Optional[list[str]] = None
+    isolated_disabled_templates: Optional[list[str]] = None
+    isolated_rollout_percent: Optional[float] = None
+    isolated_template_rollout: Optional[dict[str, float]] = None
+    isolated_fallback_mode: Optional[str] = None
+    metrics_emit_every_n: Optional[int] = None
 
 class OpenFolderRequest(BaseModel):
     """打开文件夹请求"""
@@ -317,15 +560,6 @@ class ListReportsRequest(BaseModel):
     page: Optional[int] = 1
     limit: Optional[int] = 100
     folder: Optional[str] = None
-
-
-# ========== 统一错误响应模型 ==========
-class ErrorResponse(BaseModel):
-    """统一的错误响应格式"""
-    success: bool = False
-    error: str
-    detail: Optional[str] = None
-
 
 # ========== Lifespan 生命周期管理 (替代废弃的 @app.on_event) ==========
 @asynccontextmanager
@@ -345,19 +579,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# 域路由（首批拆分：config / vulnerabilities / icp）
+config_router = APIRouter(tags=["Config"])
+vuln_router = APIRouter(tags=["Vulnerability"])
+icp_router = APIRouter(tags=["ICP"])
+
 
 # ========== 全局异常处理器 (统一错误响应) ==========
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     """处理 HTTP 异常，返回统一格式"""
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={
-            "success": False,
-            "error": str(exc.detail),
-            "detail": None
-        }
-    )
+    detail_text = str(exc.detail)
+    return _error_response(exc.status_code, detail_text, detail_text)
 
 
 @app.exception_handler(RequestValidationError)
@@ -365,40 +598,35 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     """处理请求验证错误，返回统一格式"""
     errors = exc.errors()
     error_messages = [f"{err['loc']}: {err['msg']}" for err in errors]
-    return JSONResponse(
-        status_code=422,
-        content={
-            "success": False,
-            "error": "Validation Error",
-            "detail": "; ".join(error_messages)
-        }
-    )
+    return _error_response(422, "Validation Error", "; ".join(error_messages))
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
     """处理未捕获的异常"""
     logger.error(f"Unhandled exception: {traceback.format_exc()}")
-    return JSONResponse(
-        status_code=500,
-        content={
-            "success": False,
-            "error": "Internal Server Error",
-            "detail": str(exc) if os.getenv("DEBUG") else None
-        }
-    )
+    return _error_response(500, "Internal Server Error", str(exc) if os.getenv("DEBUG") else None)
+
+
+@app.middleware("http")
+async def app_token_middleware(request: Request, call_next):
+    """Protect sensitive APIs with per-launch token when token is configured."""
+    if APP_API_TOKEN and _requires_app_token(request.method, request.url.path):
+        provided = request.headers.get("X-App-Token", "") or request.query_params.get("app_token", "")
+        if provided != APP_API_TOKEN:
+            return _error_response(403, "Forbidden", "Invalid application token")
+
+    return await call_next(request)
 
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://127.0.0.1:*",
-        "http://localhost:*",
         "http://127.0.0.1",
         "http://localhost",
-        "file://*",  # Electron file:// 协议
-        "*"  # 保留通配符作为后备（桌面应用场景）
+        "null",
     ],
+    allow_origin_regex=r"^http://(127\.0\.0\.1|localhost)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -415,11 +643,60 @@ if not os.path.exists(TEMP_DIR):
 app.mount("/temp", StaticFiles(directory=TEMP_DIR), name="temp")
 
 
+def _is_subpath(path_to_check: str, base_path: str) -> bool:
+    """安全判断：path_to_check 是否位于 base_path 内。"""
+    try:
+        target_real = os.path.realpath(path_to_check)
+        base_real = os.path.realpath(base_path)
+        return os.path.commonpath([target_real, base_real]) == base_real
+    except ValueError:
+        return False
+
+
+def _build_open_folder_allowlist() -> list[str]:
+    defaults = [
+        os.path.join("output", "report"),
+        os.path.join("output", "temp"),
+        "output",
+    ]
+    configured = shared_config.get("paths", {}).get("open_folder_allowlist", defaults)
+    if not isinstance(configured, list):
+        configured = defaults
+    resolved: list[str] = []
+    for relative_path in configured:
+        if not isinstance(relative_path, str):
+            continue
+        resolved.append(os.path.realpath(os.path.join(BASE_DIR, relative_path)))
+
+    if not resolved:
+        resolved = [os.path.realpath(OUTPUT_DIR)]
+
+    return resolved
+
+
+OPEN_FOLDER_ALLOWLIST = _build_open_folder_allowlist()
+
+
+def _is_allowed_open_folder(path_to_check: str) -> bool:
+    return any(_is_subpath(path_to_check, allowed_base) for allowed_base in OPEN_FOLDER_ALLOWLIST)
+
+
 @app.get("/")
 def read_root():
     return {"message": "ReportGenX Backend is Running", "version": config["version"]}
 
-@app.get("/api/config", response_model=ConfigResponse)
+
+@app.get("/api/health")
+def health_check():
+    return {"success": True, "status": "ok"}
+
+
+@app.get("/api/health-auth")
+def health_check_auth():
+    """Token-protected liveness endpoint for Electron main process handshake."""
+    return {"success": True, "status": "ok", "auth": True}
+
+@config_router.get("/api/config", response_model=ConfigResponse)
 def get_config():
     """获取初始化配置数据，填充前端下拉框"""
     def clean_list(lst):
@@ -436,7 +713,7 @@ def get_config():
         "vulnerabilities_list": get_cached_vulnerabilities()[0]
     }
 
-@app.get("/api/frontend-config")
+@config_router.get("/api/frontend-config")
 def get_frontend_config():
     """获取前端全局配置（风险等级颜色等共享配置）"""
     return {
@@ -445,7 +722,53 @@ def get_frontend_config():
         "version": config["version"]
     }
 
-@app.get("/api/backup-db")
+@config_router.get("/api/version", response_model=VersionResponse)
+def get_version_info():
+    """返回后端与共享配置版本，用于发布前与运行时一致性校验。"""
+    backend_version = _normalize_version_string(config.get("version", ""))
+    shared_version = _normalize_version_string(shared_config.get("app", {}).get("version", ""))
+    return {
+        "backend_version": backend_version,
+        "shared_version": shared_version,
+        "is_synced": bool(backend_version and shared_version and backend_version == shared_version),
+    }
+
+
+@config_router.get("/api/plugin-runtime-config")
+def get_plugin_runtime_config():
+    return {
+        "success": True,
+        "plugin_runtime": shared_config.get("plugin_runtime", {}),
+    }
+
+
+@config_router.post("/api/plugin-runtime-config")
+def update_plugin_runtime_config(req: PluginRuntimeConfigRequest):
+    """更新 plugin_runtime 配置（用于隔离模式灰度开关）。"""
+    global shared_config
+
+    try:
+        updates = req.model_dump(exclude_none=True)
+        current = dict(shared_config)
+        plugin_runtime_current = current.get("plugin_runtime", {})
+        if not isinstance(plugin_runtime_current, dict):
+            plugin_runtime_current = {}
+
+        plugin_runtime_next = dict(plugin_runtime_current)
+        plugin_runtime_next.update(updates)
+        current["plugin_runtime"] = plugin_runtime_next
+
+        shared_config = persist_shared_config(current)
+        return {
+            "success": True,
+            "message": "Plugin runtime config updated",
+            "plugin_runtime": shared_config.get("plugin_runtime", {}),
+        }
+    except Exception as exc:
+        _raise_internal_error("update plugin runtime config", exc)
+
+
+@config_router.get("/api/backup-db")
 def backup_database():
     """下载数据库备份"""
     db_path = os.path.join(BASE_DIR, config["vul_or_icp"])
@@ -454,7 +777,7 @@ def backup_database():
         return FileResponse(path=db_path, filename=filename, media_type='application/x-sqlite3')
     raise HTTPException(status_code=404, detail="Database file not found")
 
-@app.get("/api/vulnerability/{id_or_name}")
+@vuln_router.get("/api/vulnerability/{id_or_name}")
 def get_vulnerability_detail(id_or_name: str):
     """根据 ID 或名称获取漏洞详情"""
     _, cached_vulns = get_cached_vulnerabilities()
@@ -477,16 +800,18 @@ def get_vulnerability_detail(id_or_name: str):
 
     return {"error": "Vulnerability not found"}
 
-@app.post("/api/process-url", response_model=UrlProcessResponse)
-def process_url(req: UrlProcessRequest):
-    """处理输入的 URL/IP，解析域名和 IP，查找匹配的 ICP 备案信息"""
-    text = req.url.strip()
+def _process_url_value(url_text: str) -> dict[str, Any]:
+    """处理输入的 URL/IP，解析域名和 IP，查找匹配的 ICP 备案信息。"""
+    text = (url_text or "").strip()
     result = {
         "url": text,
         "domain": "",
         "ip": "",
         "icp_info": None
     }
+
+    if not text:
+        return result
     
     ip_pattern = r'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
     
@@ -539,9 +864,22 @@ def process_url(req: UrlProcessRequest):
         else:
             info = result['icp_info']
             logger.debug(f"Found ICP info for: {domain_key}")
-            logger.debug(f"unitName bytes: {repr(info.get('unitName', '').encode('utf-8'))}")
+            if isinstance(info, dict):
+                logger.debug(f"unitName bytes: {repr(str(info.get('unitName', '')).encode('utf-8'))}")
 
     return result
+
+
+@app.post("/api/process-url", response_model=UrlProcessResponse)
+def process_url(req: UrlProcessRequest):
+    """POST: 处理输入的 URL/IP，解析域名和 IP，查找匹配的 ICP 备案信息。"""
+    return _process_url_value(req.url)
+
+
+@app.get("/api/process-url", response_model=UrlProcessResponse)
+def process_url_get(url: str = ""):
+    """GET 兼容入口：支持 query 参数 url，避免旧客户端触发 405。"""
+    return _process_url_value(url)
 
 @app.post("/api/upload-image", response_model=UploadImageResponse)
 def upload_image(req: UploadImageRequest):
@@ -604,57 +942,7 @@ def upload_image(req: UploadImageRequest):
         logger.error(f"Upload failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/generate-report", response_model=ReportResponse)
-def generate_report(req: ReportRequest):
-    """
-    生成报告的核心接口 (重构版：使用 VulnReportHandler)
-    """
-    try:
-        # 获取漏洞报告处理器
-        handler = HandlerRegistry.get_handler("vuln_report", get_template_manager(), config)
-        if not handler:
-            raise HTTPException(status_code=500, detail="VulnReportHandler not found")
-            
-        # 转换请求数据为字典
-        data = req.dict()
-        
-        # 映射字段差异 (如果有)
-        # ReportRequest 中的 icp_screenshot_path 对应 handler 中的 icp_screenshot
-        data['icp_screenshot'] = req.icp_screenshot_path
-        
-        # 执行生成
-        result = handler.run(data, OUTPUT_DIR)
-        
-        if result["success"]:
-            # 生成下载 URL
-            file_name = os.path.basename(result["report_path"])
-            unit_name = data.get("unit_name", "Unknown")
-            download_url = f"/reports/{unit_name}/{file_name}"
-            
-            return {
-                "success": True,
-                "report_path": result["report_path"],
-                "download_url": download_url,
-                "message": result["message"]
-            }
-        else:
-            return {
-                "success": False,
-                "report_path": "",
-                "download_url": "",
-                "message": result["message"]
-            }
-
-    except Exception as e:
-        traceback.print_exc()
-        return {
-            "success": False,
-            "report_path": "",
-            "download_url": "",
-            "message": f"Error generating report: {str(e)}"
-        }
-
-@app.get("/api/vulnerabilities")
+@vuln_router.get("/api/vulnerabilities")
 def get_vulnerabilities():
     """获取所有漏洞列表及其详情"""
     try:
@@ -666,66 +954,63 @@ def get_vulnerabilities():
         # 将字典的值转换为列表返回
         return list(cached_vulns.values())
     except Exception as e:
-        logger.error(f"Error fetching vulnerabilities: {e}")
-        return []
+        _raise_internal_error("fetch vulnerabilities", e)
 
-@app.post("/api/vulnerabilities")
+@vuln_router.post("/api/vulnerabilities")
 def add_vulnerability(vuln: CustomVulnRequest, db: DbReaderDep):
     """添加新漏洞"""
     # 移除 id 字段（如果存在），因为新增时不需要
-    data = vuln.dict(exclude={'id'})
+    data = vuln.model_dump(exclude={'id'})
     success, msg = db.add_vulnerability_to_db(data)
     return handle_db_result(success, msg, reload_vulnerabilities_cache)
 
-@app.put("/api/vulnerabilities/{Vuln_id}")
+@vuln_router.put("/api/vulnerabilities/{Vuln_id}")
 def update_vulnerability(Vuln_id: str, vuln: CustomVulnRequest, db: DbReaderDep):
     """更新漏洞信息"""
     # 移除 id 字段（使用 URL 路径参数中的 Vuln_id）
-    data = vuln.dict(exclude={'id'})
+    data = vuln.model_dump(exclude={'id'})
     success, msg = db.update_vulnerability_in_db(Vuln_id, data)
     return handle_db_result(success, msg, reload_vulnerabilities_cache)
 
-@app.delete("/api/vulnerabilities/{Vuln_id}")
+@vuln_router.delete("/api/vulnerabilities/{Vuln_id}")
 def delete_vulnerability(Vuln_id: str, db: DbReaderDep):
     """删除漏洞"""
     success, msg = db.delete_vulnerability_from_db(Vuln_id)
     return handle_db_result(success, msg, reload_vulnerabilities_cache)
 
-@app.post("/api/open-folder")
+@config_router.post("/api/open-folder")
 def open_folder(req: OpenFolderRequest):
-    """打开文件所在目录"""
-    path = req.path
-    
-    # 如果未指定路径，尝试打开配置中的默认输出目录 (Use output/report explicitly for consistency)
-    if not path or path == "default":
-        path = OUTPUT_DIR
-    
-    if not path:
-        return {"success": False, "message": "No path provided"}
-    
-    path = os.path.normpath(path)
-    
-    if os.path.isfile(path):
-        target_dir = os.path.dirname(path)
-    elif os.path.exists(path) and os.path.isdir(path):
-         target_dir = path
+    """打开文件所在目录（带路径白名单校验）。"""
+    requested_path = req.path
+    if not requested_path or requested_path == "default":
+        requested_path = OUTPUT_DIR
+
+    normalized_path = os.path.realpath(os.path.abspath(os.path.normpath(requested_path)))
+
+    if os.path.isfile(normalized_path):
+        target_dir = os.path.dirname(normalized_path)
+    elif os.path.isdir(normalized_path):
+        target_dir = normalized_path
     else:
-         # Try parent if path doesn't exist (maybe file deleted?)
-         target_dir = os.path.dirname(path)
-         if not os.path.exists(target_dir):
-             return {"success": False, "message": "Path does not exist"}
+        # 兼容“文件已删除但目录仍在”的场景
+        parent_dir = os.path.dirname(normalized_path)
+        if not os.path.isdir(parent_dir):
+            raise HTTPException(status_code=404, detail="Path does not exist")
+        target_dir = parent_dir
+
+    if not _is_allowed_open_folder(target_dir):
+        raise HTTPException(status_code=403, detail="Path is not allowed")
 
     try:
-        if os.name == 'nt':
+        if os.name == "nt":
             os.startfile(target_dir)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", target_dir])
         else:
-            if sys.platform == 'darwin':
-                subprocess.Popen(['open', target_dir])
-            else:
-                subprocess.Popen(['xdg-open', target_dir])
-        return {"success": True, "message": "Folder opened"}
-    except Exception as e:
-        return {"success": False, "message": str(e)}
+            subprocess.Popen(["xdg-open", target_dir])
+        return success_response("Folder opened", path=target_dir)
+    except OSError as exc:
+        _raise_internal_error("open folder", exc)
 
 @app.post("/api/merge-reports", response_model=MergeResponse)
 def merge_reports(req: MergeRequest):
@@ -739,10 +1024,16 @@ def merge_reports(req: MergeRequest):
             
         # 如果未指定文件名或为空，生成一个带时间戳的
         filename = req.output_filename or f"Merged_{datetime.now().strftime('%Y%m%d%H%M%S')}.docx"
+        filename = os.path.basename(filename)
+        filename = re.sub(r'[<>:"/\\|?*]+', '_', filename).strip()
+        if not filename:
+            filename = f"Merged_{datetime.now().strftime('%Y%m%d%H%M%S')}.docx"
         if not filename.endswith('.docx'):
             filename += '.docx'
             
-        output_path = os.path.join(MERGE_DIR, filename)
+        output_path = os.path.realpath(os.path.join(MERGE_DIR, filename))
+        if not _is_subpath(output_path, MERGE_DIR):
+            raise HTTPException(status_code=400, detail="Invalid output filename")
         
         success, msg = ReportMerger.merge_reports(req.files, output_path)
         
@@ -761,12 +1052,7 @@ def merge_reports(req: MergeRequest):
                 "download_url": ""
             }
     except Exception as e:
-        return {
-            "success": False,
-            "message": f"合并过程出错: {str(e)}",
-            "file_path": "",
-            "download_url": ""
-        }
+        _raise_internal_error("merge reports", e)
 
 @app.post("/api/list-reports")
 def list_reports(req: Optional[ListReportsRequest] = None):
@@ -795,7 +1081,7 @@ def list_reports(req: Optional[ListReportsRequest] = None):
         report_files.sort(key=lambda x: x['mtime'], reverse=True)
         return report_files
     except Exception as e:
-        return []
+        _raise_internal_error("list reports", e)
 
 @app.post("/api/delete-report")
 def delete_report(req: DeleteFileRequest):
@@ -803,10 +1089,9 @@ def delete_report(req: DeleteFileRequest):
     try:
         file_path = req.path
         # 安全检查：确保文件在 output 目录下
-        abs_path = os.path.abspath(file_path)
-        output_abs = os.path.abspath(OUTPUT_DIR)
-        
-        if not abs_path.startswith(output_abs):
+        abs_path = os.path.realpath(os.path.abspath(file_path))
+
+        if not _is_subpath(abs_path, OUTPUT_DIR):
              return {"success": False, "message": "无法删除该目录下的文件 (Permission Denied)"}
 
         if os.path.exists(abs_path) and os.path.isfile(abs_path):
@@ -815,19 +1100,19 @@ def delete_report(req: DeleteFileRequest):
         else:
             return {"success": False, "message": "文件不存在或已被删除"}
     except Exception as e:
-        return {"success": False, "message": f"删除失败: {str(e)}"}
+        _raise_internal_error("delete report", e)
 
-@app.get("/api/icp-columns")
+@icp_router.get("/api/icp-columns")
 def get_icp_columns():
     """获取 ICP 表的所有字段名"""
     return get_db_reader().get_table_columns("icp_info_Sheet1")
 
-@app.get("/api/icp-list")
+@icp_router.get("/api/icp-list")
 def list_icp_entries(db: DbReaderDep):
     """获取所有 ICP 信息 (直接读取数据库)"""
     return db.read_icp_raw_list()
 
-@app.delete("/api/icp-entry/{vuln_id}")
+@icp_router.delete("/api/icp-entry/{vuln_id}")
 def delete_icp_entry(vuln_id: str, db: DbReaderDep):
     """删除指定的 ICP 信息 (根据 Vuln_id)"""
     success, msg = db.delete_icp_entry(vuln_id)
@@ -838,25 +1123,25 @@ def delete_icp_entry(vuln_id: str, db: DbReaderDep):
         return error_response(msg)
     raise HTTPException(status_code=500, detail=msg)
 
-@app.post("/api/icp-entry")
+@icp_router.post("/api/icp-entry")
 def add_icp_entry(req: IcpEntryRequest, db: DbReaderDep):
     """新增 ICP 信息"""
-    success, msg = db.add_icp_entry(req.dict())
+    success, msg = db.add_icp_entry(req.model_dump())
     return handle_db_result(success, msg)
 
-@app.put("/api/icp-entry/{vuln_id}")
+@icp_router.put("/api/icp-entry/{vuln_id}")
 def update_icp_entry(vuln_id: str, req: IcpEntryRequest, db: DbReaderDep):
     """更新 ICP 信息"""
-    success, msg = db.update_icp_entry(vuln_id, req.dict())
+    success, msg = db.update_icp_entry(vuln_id, req.model_dump())
     return handle_db_result(success, msg)
 
-@app.post("/api/icp-batch-delete")
+@icp_router.post("/api/icp-batch-delete")
 def batch_delete_icp(req: BatchDeleteRequest, db: DbReaderDep):
     """批量删除 ICP 信息"""
     success, msg = db.batch_delete_icp(req.ids)
     return handle_db_result(success, msg)
 
-@app.post("/api/update-config")
+@config_router.post("/api/update-config")
 def update_config(req: UpdateConfigRequest):
     """更新配置文件中的 supplierName"""
     try:
@@ -879,7 +1164,7 @@ def update_config(req: UpdateConfigRequest):
         
         return {"success": True, "message": "配置已更新"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save config: {str(e)}")
+        _raise_internal_error("update config", e)
 
 
 # ========== 模板相关 API ==========
@@ -940,7 +1225,7 @@ def get_template_data_sources(template_id: str):
     return resolved
 
 @app.post("/api/templates/{template_id}/validate")
-def validate_template_data(template_id: str, data: Dict[str, Any]):
+def validate_template_data(template_id: str, data: dict[str, Any]):
     """验证表单数据"""
     is_valid, errors = get_template_manager().validate_report_data(template_id, data)
     return {
@@ -948,56 +1233,92 @@ def validate_template_data(template_id: str, data: Dict[str, Any]):
         "errors": errors
     }
 
+
+def _build_runtime_execution_config() -> dict[str, Any]:
+    """Merge host config with shared plugin runtime switches for execution."""
+    execution_config = dict(config)
+    execution_config["plugin_runtime"] = shared_config.get("plugin_runtime", {})
+    return execution_config
+
+
+def _get_plugin_runtime_class():
+    """Lazily import runtime to avoid package resolution edge cases."""
+    module = importlib.import_module("backend.plugin_host.runtime")
+    return module.PluginRuntime
+
+
+def _reload_templates_with_alignment_check() -> tuple[TemplateManager, list[dict[str, Any]], set[str], set[str], list[str], bool, Optional[str]]:
+    """Reload templates and enforce handler alignment.
+
+    Returns:
+        (tm, templates, handlers_before, handlers_after, new_handlers, requires_restart, warning_message)
+    """
+    tm = get_template_manager()
+    handlers_before = set(HandlerRegistry.list_registered())
+
+    tm.reload_templates()
+    _assert_template_handler_alignment(tm)
+
+    templates = tm.get_template_list()
+    handlers_after = set(HandlerRegistry.list_registered())
+    new_handlers = sorted(list(handlers_after - handlers_before))
+    routers = tm.get_template_routers()
+    new_routes = [h for h in new_handlers if h in routers]
+
+    if new_routes:
+        warning_message = f"检测到新增带路由的模板 ({', '.join(new_routes)})，需要重启应用才能生效"
+        requires_restart = True
+    else:
+        warning_message = None
+        requires_restart = False
+
+    return tm, templates, handlers_before, handlers_after, new_handlers, requires_restart, warning_message
+
 @app.post("/api/templates/{template_id}/generate")
-def generate_template_report(template_id: str, data: Dict[str, Any]):
+def generate_template_report(template_id: str, data: dict[str, Any]):
     """
     使用指定模板生成报告 (新接口，使用 Handler)
     """
     try:
-        # 获取模板处理器
-        handler = HandlerRegistry.get_handler(template_id, get_template_manager(), config)
-        
-        if not handler:
-            return {
-                "success": False,
-                "report_path": "",
-                "download_url": "",
-                "message": f"No handler registered for template: {template_id}",
-                "errors": []
-            }
-        
-        # 执行报告生成
-        result = handler.run(data, OUTPUT_DIR)
+        result = _get_plugin_runtime_class().execute(
+            template_id=template_id,
+            data=data,
+            output_dir=OUTPUT_DIR,
+            template_manager=get_template_manager(),
+            config=_build_runtime_execution_config(),
+        )
         
         if result["success"]:
-            # 生成下载 URL
-            file_name = os.path.basename(result["report_path"])
-            unit_name = data.get("unit_name", "Unknown")
-            download_url = f"/reports/{unit_name}/{file_name}"
+            report_path = os.path.realpath(result["report_path"])
+            if not _is_subpath(report_path, OUTPUT_DIR):
+                raise HTTPException(status_code=400, detail="Report path escaped output directory")
+            relative_report_path = os.path.relpath(report_path, OUTPUT_DIR).replace(os.sep, "/")
+            download_url = f"/reports/{quote(relative_report_path, safe='/')}"
             
             return {
                 "success": True,
-                "report_path": result["report_path"],
+                "report_path": report_path,
                 "download_url": download_url,
                 "message": result["message"]
             }
-        else:
-            return {
-                "success": False,
-                "report_path": "",
-                "download_url": "",
-                "message": result.get("message", "报告生成失败"),
-                "errors": result.get("errors", [])
-            }
+        return _build_error_payload(
+            result.get("message", "报告生成失败"),
+            None,
+            report_path="",
+            download_url="",
+            errors=result.get("errors", []),
+        )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Generate report error: {traceback.format_exc()}")
-        return {
-            "success": False,
-            "report_path": "",
-            "download_url": "",
-            "message": f"报告生成异常: {str(e)}",
-            "errors": []
-        }
+        return _build_error_payload(
+            "报告生成异常",
+            str(e),
+            report_path="",
+            download_url="",
+            errors=[],
+        )
 
 @app.get("/api/templates/{template_id}/preview")
 def get_template_preview_config(template_id: str):
@@ -1022,30 +1343,8 @@ def reload_templates():
     - 新增的 API 路由需要重启应用才能生效（FastAPI 限制）
     """
     try:
-        # 记录重载前的 handler 数量
-        handlers_before = set(HandlerRegistry.list_registered())
-        
-        # 重新加载模板
-        get_template_manager().reload_templates()
-        templates = get_template_manager().get_template_list()
-        handlers_after = set(HandlerRegistry.list_registered())
-        
-        # 检测是否有新增的 handler（问题 8：路由无法动态卸载的限制提示）
-        new_handlers = handlers_after - handlers_before
-        warning_message = None
-        requires_restart = False
-        
-        # 检查新增的 handler 是否包含路由
-        routers = get_template_manager().get_template_routers()
-        new_routes = [h for h in new_handlers if h in routers]
-        
-        if new_routes:
-            warning_message = f"检测到新增带路由的模板 ({', '.join(new_routes)})，需要重启应用才能生效"
-            requires_restart = True
-        elif new_handlers:
-            # 即使没有路由，也提示一下，但不是强制重启
-            pass
-        
+        _, templates, _, handlers_after, new_handlers, requires_restart, warning_message = _reload_templates_with_alignment_check()
+
         return {
             "success": True,
             "message": "模板已重新加载",
@@ -1053,13 +1352,11 @@ def reload_templates():
             "loaded_count": len(templates),
             "templates": templates,
             "handlers": list(handlers_after),
-            "new_handlers": list(new_handlers),
+            "new_handlers": new_handlers,
             "requires_restart": requires_restart
         }
     except Exception as e:
-        logger.error(f"Failed to reload templates: {str(e)}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to reload templates: {str(e)}")
+        _raise_internal_error("reload templates", e)
 
 
 @app.get("/api/templates/{template_id}/details")
@@ -1129,7 +1426,7 @@ def export_template(template_id: str):
 
 
 @app.post("/api/templates/batch-export")
-def batch_export_templates(template_ids: List[str]):
+def batch_export_templates(template_ids: list[str]):
     """批量导出多个模板为一个压缩包"""
     if not template_ids:
         raise HTTPException(status_code=400, detail="No template IDs provided")
@@ -1168,7 +1465,7 @@ def batch_export_templates(template_ids: List[str]):
     )
 
 
-def _detect_templates_in_zip(names: List[str]) -> List[str]:
+def _detect_templates_in_zip(names: list[str]) -> list[str]:
     """
     检测 ZIP 中的模板结构
     返回模板 ID 列表
@@ -1184,7 +1481,7 @@ def _detect_templates_in_zip(names: List[str]) -> List[str]:
     return sorted(list(template_ids))
 
 
-def _import_single_template(zf, template_id: str, all_names: List[str], overwrite: bool) -> Dict[str, Any]:
+def _import_single_template(zf, template_id: str, all_names: list[str], overwrite: bool) -> dict[str, Any]:
     """
     从 ZIP 中导入单个模板 (Security Hardened)
     """
@@ -1201,6 +1498,7 @@ def _import_single_template(zf, template_id: str, all_names: List[str], overwrit
     
     # 检查是否已存在
     target_dir = os.path.join(TEMPLATES_DIR, template_id)
+    backup_dir: Optional[str] = None
     if os.path.exists(target_dir):
         if not overwrite:
             return {"success": False, "reason": "Already exists (overwrite=false)"}
@@ -1243,9 +1541,16 @@ def _import_single_template(zf, template_id: str, all_names: List[str], overwrit
         # 发生错误，清理残局
         if os.path.exists(target_dir):
             shutil.rmtree(target_dir)
+        if backup_dir and os.path.exists(backup_dir):
+            shutil.move(backup_dir, target_dir)
         return {"success": False, "reason": str(e)}
-    
-    return {"success": True}
+
+    return {
+        "success": True,
+        "template_id": template_id,
+        "target_dir": target_dir,
+        "backup_dir": backup_dir,
+    }
 
 
 @app.post("/api/templates/import")
@@ -1278,12 +1583,14 @@ async def import_template(file: UploadFile = File(...), overwrite: bool = Form(d
             imported = []
             skipped = []
             errors = []
+            import_contexts: list[dict[str, Any]] = []
             
             for template_id in template_ids:
                 try:
                     result = _import_single_template(zf, template_id, names, overwrite)
                     if result['success']:
                         imported.append(template_id)
+                        import_contexts.append(result)
                     else:
                         skipped.append({'id': template_id, 'reason': result['reason']})
                 except Exception as e:
@@ -1291,7 +1598,31 @@ async def import_template(file: UploadFile = File(...), overwrite: bool = Form(d
             
             # 重新加载模板
             if imported:
-                get_template_manager().reload_templates()
+                try:
+                    _reload_templates_with_alignment_check()
+                except Exception as reload_err:
+                    # reload 失败时回滚导入变更，恢复旧模板目录
+                    for ctx in import_contexts:
+                        target_dir = ctx.get("target_dir")
+                        backup_dir = ctx.get("backup_dir")
+                        if isinstance(target_dir, str) and os.path.exists(target_dir):
+                            shutil.rmtree(target_dir)
+                        if isinstance(backup_dir, str) and backup_dir and isinstance(target_dir, str) and target_dir and os.path.exists(backup_dir):
+                            shutil.move(backup_dir, target_dir)
+
+                    # 再次尝试恢复模板注册状态
+                    try:
+                        _reload_templates_with_alignment_check()
+                    except Exception:
+                        logger.error("Failed to restore template registry after import rollback")
+
+                    raise HTTPException(status_code=500, detail=f"Import rollback applied: {str(reload_err)}")
+
+                # reload 成功后清理备份目录
+                for ctx in import_contexts:
+                    backup_dir = ctx.get("backup_dir")
+                    if isinstance(backup_dir, str) and backup_dir and os.path.exists(backup_dir):
+                        shutil.rmtree(backup_dir)
             
             return {
                 "success": len(imported) > 0,
@@ -1310,7 +1641,7 @@ async def import_template(file: UploadFile = File(...), overwrite: bool = Form(d
 
 
 @app.post("/api/templates/batch-import")
-async def batch_import_templates(files: List[UploadFile] = File(...), overwrite: bool = Form(default=False)):
+async def batch_import_templates(files: list[UploadFile] = File(...), overwrite: bool = Form(default=False)):
     """
     批量导入多个模板文件
     支持选择多个 ZIP 文件同时上传
@@ -1334,13 +1665,15 @@ async def batch_import_templates(files: List[UploadFile] = File(...), overwrite:
             results.append({
                 "filename": file.filename,
                 "success": False,
-                "error": e.detail
+                "message": str(e.detail),
+                "detail": str(e.detail),
             })
         except Exception as e:
             results.append({
                 "filename": file.filename,
                 "success": False,
-                "error": str(e)
+                "message": str(e),
+                "detail": str(e),
             })
     
     total_imported = sum(len(r.get("imported", [])) for r in results if r["success"])
@@ -1388,6 +1721,12 @@ def delete_template(template_id: str, backup: bool = True):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
+
+
+# 将按域拆分的路由挂载回主应用（保持原路径不变）
+app.include_router(config_router)
+app.include_router(vuln_router)
+app.include_router(icp_router)
 
 
 if __name__ == "__main__":

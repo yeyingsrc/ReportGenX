@@ -174,7 +174,13 @@ window.AppFormRenderer = {
     parseBehaviors(schema) {
         if (!schema.behaviors) return;
         schema.behaviors.forEach(beh => {
-            if (beh.trigger && beh.trigger.field) this.behaviors[beh.trigger.field] = beh;
+            if (beh.trigger && beh.trigger.field) {
+                const triggerField = beh.trigger.field;
+                if (!this.behaviors[triggerField]) {
+                    this.behaviors[triggerField] = [];
+                }
+                this.behaviors[triggerField].push(beh);
+            }
         });
     },
 
@@ -318,137 +324,17 @@ window.AppFormRenderer = {
     },
 
     createField(field) {
-        if (field.type === 'hidden') {
-            const h = document.createElement('input');
-            h.type = 'hidden'; h.id = field.key; h.name = field.key;
-            return h;
+        if (!window.AppFormRendererFieldOps) {
+            throw new Error('AppFormRendererFieldOps is not loaded');
         }
-        const wrapper = document.createElement('div');
-        // 图片字段、文本域、复选框组、测试目标列表、测试人员信息列表、漏洞列表占整行
-        const isWideField = field.type === 'textarea' || field.type === 'image' || field.type === 'image_list' || field.type === 'checkbox_group' || field.type === 'target_list' || field.type === 'tester_info_list' || field.type === 'vuln_list';
-        wrapper.className = (isWideField ? 'col-12' : 'col-4') + ' form-group';
-        
-        const label = document.createElement('label');
-        label.setAttribute('for', field.key);
-        label.innerHTML = field.label + (field.required ? ' <span style="color:red">*</span>' : '');
-        
-        let pasteBtn = null;
-        
-        // 对于图片字段，添加粘贴按钮到标签行
-        if ((field.type === 'image' || field.type === 'image_list') && field.paste_enabled) {
-            const labelRow = document.createElement('div');
-            labelRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px;';
-            labelRow.appendChild(label);
-            
-            pasteBtn = document.createElement('button');
-            pasteBtn.type = 'button';
-            pasteBtn.className = 'btn-mini';
-            pasteBtn.id = `btn-paste-${field.key}`;
-            pasteBtn.innerText = '粘贴截图';
-            labelRow.appendChild(pasteBtn);
-            
-            wrapper.appendChild(labelRow);
-        } else {
-            wrapper.appendChild(label);
-        }
-        
-        const input = this.createInput(field, pasteBtn);
-        if (input) wrapper.appendChild(input);
-        return wrapper;
+        return window.AppFormRendererFieldOps.createField(this, field);
     },
 
     createInput(field, pasteBtn = null) {
-        let el;
-        if (field.type === 'searchable_select') {
-            // 可搜索下拉框
-            el = this.createSearchableSelect(field);
-        } else if (field.type === 'select') {
-            el = document.createElement('select');
-            const empty = document.createElement('option');
-            empty.value = ''; empty.textContent = '-- 请选择 --';
-            el.appendChild(empty);
-            if (field.options) field.options.forEach(o => {
-                const opt = document.createElement('option');
-                opt.value = typeof o === 'object' ? o.value : o;
-                opt.textContent = typeof o === 'object' ? (o.label||o.value) : o;
-                el.appendChild(opt);
-            });
-            if (field.source) el.dataset.source = field.source;
-            el.addEventListener('change', e => {
-                this.formData[field.key] = e.target.value;
-                this.handleChange(field, e.target.value);
-                // 处理 presets 自动填充
-                if (field.presets && field.presets[e.target.value]) {
-                    this.applyPresets(field.presets[e.target.value]);
-                }
-            });
-        } else if (field.type === 'checkbox_group') {
-            // 多选复选框组
-            el = this.createCheckboxGroup(field);
-        } else if (field.type === 'checkbox') {
-            // 单个复选框（开关）
-            el = this.createCheckbox(field);
-        } else if (field.type === 'textarea') {
-            el = document.createElement('textarea');
-            el.rows = field.rows || 4;
-            el.placeholder = field.placeholder || '';
-            el.addEventListener('input', e => { this.formData[field.key] = e.target.value; });
-        } else if (field.type === 'image') {
-            // 单图片上传
-            el = this.createImageUploader(field, false, pasteBtn);
-        } else if (field.type === 'image_list') {
-            // 多图片上传
-            el = this.createImageUploader(field, true, pasteBtn);
-        } else if (field.type === 'target_list') {
-            // 测试目标列表
-            el = this.createTargetList(field);
-        } else if (field.type === 'tester_info_list') {
-            // 测试人员信息列表
-            el = this.createTesterInfoList(field);
-        } else if (field.type === 'vuln_list') {
-            // 漏洞详情列表
-            el = this.createVulnList(field);
-        } else {
-            el = document.createElement('input');
-            el.type = 'text';
-            el.placeholder = field.placeholder || '';
-            
-            // 设置初始值
-            let initialValue = '';
-            
-            // 处理自动生成字段 (兼容布尔值和字符串 "true")
-            const shouldAutoGenerate = field.auto_generate === true || field.auto_generate === 'true';
-            if (shouldAutoGenerate && field.auto_generate_rule) {
-                initialValue = this.generateAutoValue(field.auto_generate_rule);
-            } else if (field.default === 'today') {
-                initialValue = new Date().toISOString().split('T')[0];
-            } else if (field.default) {
-                initialValue = field.default;
-            }
-            
-            if (initialValue) {
-                el.value = initialValue;
-                this.formData[field.key] = initialValue;
-            }
-            
-            el.addEventListener('input', e => { this.formData[field.key] = e.target.value; this.handleChange(field, e.target.value); });
-            
-            // 对 URL 类型字段添加 blur 事件监听（用于 ICP 查询）
-            if (field.key === 'url' || field.on_change === 'resolve_url') {
-                el.addEventListener('blur', async (e) => {
-                    const urlValue = e.target.value.trim();
-                    if (!urlValue) return;
-                    await this.handleUrlProcess(urlValue);
-                });
-            }
+        if (!window.AppFormRendererFieldOps) {
+            throw new Error('AppFormRendererFieldOps is not loaded');
         }
-        // checkbox_group 类型内部已设置正确的 id，不要覆盖
-        if (el.tagName && field.type !== 'checkbox_group') {
-            el.id = field.key; 
-            el.name = field.key;
-        }
-        if (field.readonly && el.tagName === 'INPUT') { el.readOnly = true; el.style.background = '#eee'; }
-        return el;
+        return window.AppFormRendererFieldOps.createInput(this, field, pasteBtn);
     },
     
     // 创建可搜索下拉框
@@ -559,95 +445,18 @@ window.AppFormRenderer = {
     
     // 创建图片上传组件
     createImageUploader(field, multiple, pasteBtn = null) {
-        const container = document.createElement('div');
-        container.className = 'image-upload-container';
-        container.id = field.key;
-        
-        // 上传区域
-        const uploadArea = document.createElement('div');
-        uploadArea.className = 'upload-area';
-        uploadArea.id = `${field.key}-upload-area`;
-        uploadArea.innerHTML = `
-            <span class="upload-icon">📷</span>
-            <p>${field.help_text || (multiple ? '点击上传或粘贴截图' : '点击上传或粘贴截图')}</p>
-        `;
-        container.appendChild(uploadArea);
-        
-        // 预览容器
-        const previewContainer = document.createElement('div');
-        previewContainer.className = multiple ? 'image-list-container' : 'preview-container';
-        previewContainer.id = `${field.key}-preview`;
-        container.appendChild(previewContainer);
-        
-        // 隐藏字段存储路径
-        const hiddenInput = document.createElement('input');
-        hiddenInput.type = 'hidden';
-        hiddenInput.id = `${field.key}_path`;
-        hiddenInput.name = `${field.key}_path`;
-        container.appendChild(hiddenInput);
-        
-        // 初始化数据存储
-        if (multiple) {
-            this.formData[field.key] = [];
-        } else {
-            this.formData[field.key] = '';
+        if (!window.AppFormRendererImageOps) {
+            throw new Error('AppFormRendererImageOps is not loaded');
         }
-        
-        // 绑定上传事件（传入粘贴按钮引用）
-        this.bindImageUploadEvents(field, uploadArea, previewContainer, multiple, pasteBtn);
-        
-        return container;
+        return window.AppFormRendererImageOps.createImageUploader(this, field, multiple, pasteBtn);
     },
     
     // 绑定图片上传事件
     bindImageUploadEvents(field, uploadArea, previewContainer, multiple, pasteBtn = null) {
-        const self = this;
-        
-        // 确保预览模态框存在
-        this.ensurePreviewModal();
-        
-        // 点击上传
-        uploadArea.addEventListener('click', (e) => {
-            if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = field.accept || 'image/*';
-            input.onchange = async (ev) => {
-                const file = ev.target.files[0];
-                if (file) {
-                    const result = await self.uploadImage(file);
-                    if (result) self.addImageItem(field, result, previewContainer, multiple);
-                }
-            };
-            input.click();
-        });
-        
-        // 粘贴按钮 - 直接使用传入的按钮引用
-        if (pasteBtn) {
-            pasteBtn.onclick = async (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                try {
-                    const items = await navigator.clipboard.read();
-                    let found = false;
-                    for (const item of items) {
-                        const imgType = item.types.find(t => t.startsWith('image/'));
-                        if (imgType) {
-                            found = true;
-                            const blob = await item.getType(imgType);
-                            const result = await self.uploadImage(blob);
-                            if (result) self.addImageItem(field, result, previewContainer, multiple);
-                            if (!multiple) break;
-                        }
-                    }
-                    if (!found && window.AppUtils) {
-                        AppUtils.showToast("剪贴板中未发现图片", "info");
-                    }
-                } catch (err) {
-                    if (window.AppUtils) AppUtils.showToast("无法读取剪贴板", "error");
-                }
-            };
+        if (!window.AppFormRendererImageOps) {
+            throw new Error('AppFormRendererImageOps is not loaded');
         }
+        return window.AppFormRendererImageOps.bindImageUploadEvents(this, field, uploadArea, previewContainer, multiple, pasteBtn);
     },
     
     // 上传图片到服务器
@@ -669,130 +478,458 @@ window.AppFormRenderer = {
     
     // 添加图片项到预览 - 使用 CSS 类替代内联样式
     addImageItem(field, imageInfo, container, multiple) {
-        const fullUrl = `${window.AppAPI.BASE_URL}${imageInfo.url}`;
-        const self = this;
-        
-        if (multiple) {
-            // 多图模式 - 使用 CSS 类
-            const wrapper = document.createElement('div');
-            wrapper.className = 'evidence-item';
-            
-            const imgBox = document.createElement('div');
-            const img = document.createElement('img');
-            img.src = fullUrl;
-            imgBox.appendChild(img);
-            
-            const infoBox = document.createElement('div');
-            infoBox.className = 'evidence-info-box';
-            
-            const label = document.createElement('label');
-            label.innerText = field.description_placeholder ? "图片说明:" : "图片说明/复现步骤:";
-            label.style.marginBottom = "5px";
-            
-            const textarea = document.createElement('textarea');
-            textarea.rows = 4;
-            textarea.className = 'evidence-textarea';
-            textarea.placeholder = field.description_placeholder || "请输入此截图的说明文字...";
-            
-            const delBtn = document.createElement('button');
-            delBtn.type = 'button';
-            delBtn.innerText = "删除";
-            delBtn.className = 'btn-delete';
-            delBtn.style.marginTop = '25px';
-            delBtn.style.alignSelf = 'flex-start';
-            
-            // 创建数据对象
-            const evidenceObj = { path: imageInfo.file_path, description: "" };
-            if (!Array.isArray(this.formData[field.key])) {
-                this.formData[field.key] = [];
-            }
-            this.formData[field.key].push(evidenceObj);
-            
-            textarea.addEventListener('input', (e) => { evidenceObj.description = e.target.value; });
-            
-            delBtn.addEventListener('click', () => {
-                wrapper.remove();
-                const idx = this.formData[field.key].indexOf(evidenceObj);
-                if (idx > -1) this.formData[field.key].splice(idx, 1);
-            });
-            
-            img.onclick = () => this.openImagePreview(img.src, textarea.value || "截图预览");
-            
-            infoBox.appendChild(label);
-            infoBox.appendChild(textarea);
-            
-            wrapper.appendChild(imgBox);
-            wrapper.appendChild(infoBox);
-            wrapper.appendChild(delBtn);
-            
-            container.appendChild(wrapper);
-            
-        } else {
-            // 单图模式 - 使用 CSS 类
-            container.innerHTML = '';
-            const thumbWrapper = document.createElement('div');
-            thumbWrapper.className = 'thumb-wrapper';
-            
-            const img = document.createElement('img');
-            img.src = fullUrl;
-            img.className = 'thumb-img';
-            img.onclick = () => this.openImagePreview(img.src, field.label || "图片预览");
-            
-            thumbWrapper.appendChild(img);
-            container.appendChild(thumbWrapper);
-            
-            // 存储路径
-            this.formData[field.key] = imageInfo.file_path;
-            const hiddenInput = document.getElementById(`${field.key}_path`);
-            if (hiddenInput) hiddenInput.value = imageInfo.file_path;
+        if (!window.AppFormRendererImageOps) {
+            throw new Error('AppFormRendererImageOps is not loaded');
         }
+        return window.AppFormRendererImageOps.addImageItem(this, field, imageInfo, container, multiple);
     },
     
     // 确保预览模态框存在 - 使用 CSS 类替代内联样式
     ensurePreviewModal() {
-        if (document.getElementById('form-image-preview-modal')) return;
-        
-        const modal = document.createElement('div');
-        modal.id = 'form-image-preview-modal';
-        modal.className = 'image-preview-modal';
-        
-        modal.onclick = (e) => {
-            if (e.target === modal) this.closeImagePreview();
-        };
-
-        const img = document.createElement('img');
-        
-        const closeBtn = document.createElement('span');
-        closeBtn.innerHTML = "&times;";
-        closeBtn.className = 'image-preview-close';
-        closeBtn.onclick = () => this.closeImagePreview();
-        
-        const caption = document.createElement('div');
-        caption.className = 'image-preview-caption';
-
-        modal.appendChild(closeBtn);
-        modal.appendChild(img);
-        modal.appendChild(caption);
-        document.body.appendChild(modal);
+        if (!window.AppFormRendererImageOps) {
+            throw new Error('AppFormRendererImageOps is not loaded');
+        }
+        return window.AppFormRendererImageOps.ensurePreviewModal(this);
     },
     
     openImagePreview(src, text) {
-        const modal = document.getElementById('form-image-preview-modal');
-        if (!modal) return;
-        const img = modal.querySelector('img');
-        const cap = modal.querySelector('.image-preview-caption');
-        
-        img.src = src;
-        cap.innerText = text || "";
-        modal.classList.add('show');
+        if (!window.AppFormRendererImageOps) {
+            throw new Error('AppFormRendererImageOps is not loaded');
+        }
+        return window.AppFormRendererImageOps.openImagePreview(this, src, text);
     },
     
     closeImagePreview() {
-        const modal = document.getElementById('form-image-preview-modal');
-        if (!modal) return;
-        modal.classList.remove('show');
+        if (!window.AppFormRendererImageOps) {
+            throw new Error('AppFormRendererImageOps is not loaded');
+        }
+        return window.AppFormRendererImageOps.closeImagePreview(this);
     },
-    
+
+    // 创建数据库截图分组组件
+    createDbScreenshotGroup(field) {
+        const self = this;
+        const container = document.createElement('div');
+        container.className = 'db-screenshot-group-container';
+        container.id = field.key;
+        
+        // 初始化数据
+        if (!this.formData[field.key]) {
+            this.formData[field.key] = [];
+        }
+        
+        // 分组列表容器
+        const groupList = document.createElement('div');
+        groupList.className = 'db-group-list';
+        container.appendChild(groupList);
+        
+        // 添加数据库按钮
+        const addDbBtn = document.createElement('button');
+        addDbBtn.type = 'button';
+        addDbBtn.className = 'btn-add-db-group';
+        addDbBtn.innerHTML = '+ 添加数据库';
+        addDbBtn.onclick = () => this.addDbGroup(field, groupList);
+        container.appendChild(addDbBtn);
+        
+        return container;
+    },
+
+    // 添加数据库分组
+    addDbGroup(field, groupList, groupData = null) {
+        const self = this;
+        const fieldKey = field.key;
+        
+        // 创建分组数据
+        const group = groupData || { db_title: '', items: [] };
+        if (!groupData) {
+            this.formData[fieldKey].push(group);
+        }
+        
+        // 分组容器
+        const groupDiv = document.createElement('div');
+        groupDiv.className = 'db-group-item';
+        
+        // 分组头部
+        const header = document.createElement('div');
+        header.className = 'db-group-header';
+        
+        const titleInput = document.createElement('input');
+        titleInput.type = 'text';
+        titleInput.className = 'db-group-title-input';
+        titleInput.placeholder = '数据库标题，如：Oracle数据库172.31.0.196:1521';
+        titleInput.value = group.db_title || '';
+        titleInput.addEventListener('input', (e) => { group.db_title = e.target.value; });
+        
+        // 粘贴截图按钮
+        const pasteBtn = document.createElement('button');
+        pasteBtn.type = 'button';
+        pasteBtn.className = 'btn-paste-screenshot';
+        pasteBtn.innerHTML = '粘贴截图';
+        
+        // 删除数据库按钮
+        const delGroupBtn = document.createElement('button');
+        delGroupBtn.type = 'button';
+        delGroupBtn.className = 'btn-delete-group';
+        delGroupBtn.innerHTML = '删除数据库';
+        delGroupBtn.onclick = () => {
+            const idx = this.formData[fieldKey].indexOf(group);
+            if (idx > -1) this.formData[fieldKey].splice(idx, 1);
+            groupDiv.remove();
+        };
+        
+        header.appendChild(titleInput);
+        header.appendChild(pasteBtn);
+        header.appendChild(delGroupBtn);
+        groupDiv.appendChild(header);
+        
+        // 创建 image_list 风格的上传区域
+        const uploadArea = document.createElement('div');
+        uploadArea.className = 'upload-area';
+        uploadArea.innerHTML = `
+            <span class="upload-icon">📷</span>
+            <p>点击上传或粘贴截图</p>
+        `;
+        groupDiv.appendChild(uploadArea);
+        
+        // 图片列表容器
+        const previewContainer = document.createElement('div');
+        previewContainer.className = 'image-list-container';
+        groupDiv.appendChild(previewContainer);
+        
+        // 绑定上传和粘贴事件
+        this.bindDbGroupImageEvents(field, group, uploadArea, previewContainer, pasteBtn);
+        
+        groupList.appendChild(groupDiv);
+        
+        // 如果有预存数据，渲染已有图片
+        if (group.items && group.items.length > 0) {
+            group.items.forEach(item => {
+                this.addDbGroupImageItem(field, group, item, previewContainer);
+            });
+        }
+    },
+
+    // 绑定数据库分组的图片上传事件
+    bindDbGroupImageEvents(field, group, uploadArea, previewContainer, pasteBtn) {
+        const self = this;
+        
+        // 点击上传
+        uploadArea.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = field.accept || 'image/*';
+            input.onchange = async (ev) => {
+                const file = ev.target.files[0];
+                if (file) {
+                    const result = await self.uploadImage(file);
+                    if (result) {
+                        const newItem = { path: result.file_path, description: '' };
+                        group.items.push(newItem);
+                        self.addDbGroupImageItem(field, group, newItem, previewContainer, result);
+                    }
+                }
+            };
+            input.click();
+        });
+        
+        // 粘贴按钮事件
+        pasteBtn.onclick = async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+                const items = await navigator.clipboard.read();
+                let found = false;
+                for (const item of items) {
+                    const imgType = item.types.find(t => t.startsWith('image/'));
+                    if (imgType) {
+                        found = true;
+                        const blob = await item.getType(imgType);
+                        const result = await self.uploadImage(blob);
+                        if (result) {
+                            const newItem = { path: result.file_path, description: '' };
+                            group.items.push(newItem);
+                            self.addDbGroupImageItem(field, group, newItem, previewContainer, result);
+                        }
+                    }
+                }
+                if (!found && window.AppUtils) {
+                    AppUtils.showToast("剪贴板中未发现图片", "info");
+                }
+            } catch (err) {
+                if (window.AppUtils) AppUtils.showToast("无法读取剪贴板", "error");
+            }
+        };
+    },
+
+    // 添加数据库分组中的图片项（复用 image_list 风格）
+    addDbGroupImageItem(field, group, item, container, imageInfo = null) {
+        const self = this;
+        const fullUrl = imageInfo 
+            ? `${window.AppAPI.BASE_URL}${imageInfo.url}`
+            : `${window.AppAPI.BASE_URL}/temp/${item.path.split(/[/\\]/).pop()}`;
+        
+        const wrapper = document.createElement('div');
+        wrapper.className = 'evidence-item';
+        
+        const imgBox = document.createElement('div');
+        const img = document.createElement('img');
+        img.src = fullUrl;
+        img.onclick = () => this.openImagePreview(img.src, item.description || '截图预览');
+        imgBox.appendChild(img);
+        
+        const infoBox = document.createElement('div');
+        infoBox.className = 'evidence-info-box';
+        
+        const label = document.createElement('label');
+        label.innerText = '图片说明:';
+        label.style.marginBottom = '5px';
+        
+        const textarea = document.createElement('textarea');
+        textarea.rows = 4;
+        textarea.className = 'evidence-textarea';
+        textarea.placeholder = '如：cms_core库t_acct_transinfo表，获取到38453条交易信息';
+        textarea.value = item.description || '';
+        textarea.addEventListener('input', (e) => { item.description = e.target.value; });
+        
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.innerText = '删除';
+        delBtn.className = 'btn-delete';
+        delBtn.style.marginTop = '25px';
+        delBtn.style.alignSelf = 'flex-start';
+        delBtn.onclick = () => {
+            const idx = group.items.indexOf(item);
+            if (idx > -1) group.items.splice(idx, 1);
+            wrapper.remove();
+        };
+        
+        infoBox.appendChild(label);
+        infoBox.appendChild(textarea);
+        
+        wrapper.appendChild(imgBox);
+        wrapper.appendChild(infoBox);
+        wrapper.appendChild(delBtn);
+        container.appendChild(wrapper);
+    },
+
+    // 创建服务器类型分组组件
+    createServerTypeGroup(field) {
+        const self = this;
+        const container = document.createElement('div');
+        container.className = 'server-type-group-container';
+        container.id = field.key;
+        
+        // 初始化数据
+        if (!this.formData[field.key]) {
+            this.formData[field.key] = [];
+        }
+        
+        // 分组列表容器
+        const groupList = document.createElement('div');
+        groupList.className = 'server-type-group-list';
+        container.appendChild(groupList);
+        
+        // 添加服务器类型按钮
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'btn-add-server-type';
+        addBtn.innerHTML = '+ 添加服务器类型';
+        addBtn.onclick = () => this.addServerTypeGroup(field, groupList);
+        container.appendChild(addBtn);
+        
+        return container;
+    },
+
+    // 添加服务器类型分组
+    addServerTypeGroup(field, groupList, groupData = null) {
+        const self = this;
+        const fieldKey = field.key;
+        
+        // 创建分组数据
+        const group = groupData || { type_name: 'SSH', items: [] };
+        if (!groupData) {
+            this.formData[fieldKey].push(group);
+        }
+        
+        // 分组容器
+        const groupDiv = document.createElement('div');
+        groupDiv.className = 'server-type-group-item';
+        
+        // 分组头部
+        const header = document.createElement('div');
+        header.className = 'server-type-group-header';
+        
+        // 类型选择下拉框
+        const typeSelect = document.createElement('select');
+        typeSelect.className = 'server-type-select';
+        const typeOptions = field.type_options || [
+            {value: 'SSH', label: 'SSH'},
+            {value: 'RDP', label: 'RDP'},
+            {value: 'FTP', label: 'FTP'},
+            {value: 'Telnet', label: 'Telnet'},
+            {value: '其他', label: '其他'}
+        ];
+        typeOptions.forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt.value;
+            option.textContent = opt.label;
+            if (opt.value === group.type_name) option.selected = true;
+            typeSelect.appendChild(option);
+        });
+        typeSelect.addEventListener('change', (e) => { group.type_name = e.target.value; });
+        
+        // 粘贴截图按钮
+        const pasteBtn = document.createElement('button');
+        pasteBtn.type = 'button';
+        pasteBtn.className = 'btn-paste-screenshot';
+        pasteBtn.innerHTML = '粘贴截图';
+        
+        // 删除类型按钮
+        const delGroupBtn = document.createElement('button');
+        delGroupBtn.type = 'button';
+        delGroupBtn.className = 'btn-delete-group';
+        delGroupBtn.innerHTML = '删除类型';
+        delGroupBtn.onclick = () => {
+            const idx = this.formData[fieldKey].indexOf(group);
+            if (idx > -1) this.formData[fieldKey].splice(idx, 1);
+            groupDiv.remove();
+        };
+        
+        header.appendChild(typeSelect);
+        header.appendChild(pasteBtn);
+        header.appendChild(delGroupBtn);
+        groupDiv.appendChild(header);
+        
+        // 创建上传区域
+        const uploadArea = document.createElement('div');
+        uploadArea.className = 'upload-area';
+        uploadArea.innerHTML = `
+            <span class="upload-icon">📷</span>
+            <p>点击上传或粘贴截图</p>
+        `;
+        groupDiv.appendChild(uploadArea);
+        
+        // 图片列表容器
+        const previewContainer = document.createElement('div');
+        previewContainer.className = 'image-list-container';
+        groupDiv.appendChild(previewContainer);
+        
+        // 绑定上传和粘贴事件
+        this.bindServerTypeImageEvents(field, group, uploadArea, previewContainer, pasteBtn);
+        
+        groupList.appendChild(groupDiv);
+        
+        // 如果有预存数据，渲染已有图片
+        if (group.items && group.items.length > 0) {
+            group.items.forEach(item => {
+                this.addServerTypeImageItem(field, group, item, previewContainer);
+            });
+        }
+    },
+
+    // 绑定服务器类型分组的图片上传事件
+    bindServerTypeImageEvents(field, group, uploadArea, previewContainer, pasteBtn) {
+        const self = this;
+        
+        // 点击上传
+        uploadArea.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = field.accept || 'image/*';
+            input.onchange = async (ev) => {
+                const file = ev.target.files[0];
+                if (file) {
+                    const result = await self.uploadImage(file);
+                    if (result) {
+                        const newItem = { server_desc: '', server_screenshot: result.file_path };
+                        group.items.push(newItem);
+                        self.addServerTypeImageItem(field, group, newItem, previewContainer, result);
+                    }
+                }
+            };
+            input.click();
+        });
+        
+        // 粘贴按钮事件
+        pasteBtn.onclick = async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            try {
+                const items = await navigator.clipboard.read();
+                let found = false;
+                for (const item of items) {
+                    const imgType = item.types.find(t => t.startsWith('image/'));
+                    if (imgType) {
+                        found = true;
+                        const blob = await item.getType(imgType);
+                        const result = await self.uploadImage(blob);
+                        if (result) {
+                            const newItem = { server_desc: '', server_screenshot: result.file_path };
+                            group.items.push(newItem);
+                            self.addServerTypeImageItem(field, group, newItem, previewContainer, result);
+                        }
+                    }
+                }
+                if (!found && window.AppUtils) {
+                    AppUtils.showToast("剪贴板中未发现图片", "info");
+                }
+            } catch (err) {
+                if (window.AppUtils) AppUtils.showToast("无法读取剪贴板", "error");
+            }
+        };
+    },
+
+    // 添加服务器类型分组中的图片项
+    addServerTypeImageItem(field, group, item, container, imageInfo = null) {
+        const self = this;
+        const fullUrl = imageInfo 
+            ? `${window.AppAPI.BASE_URL}${imageInfo.url}`
+            : `${window.AppAPI.BASE_URL}/temp/${item.server_screenshot.split(/[/\\]/).pop()}`;
+        
+        const wrapper = document.createElement('div');
+        wrapper.className = 'evidence-item';
+        
+        const imgBox = document.createElement('div');
+        const img = document.createElement('img');
+        img.src = fullUrl;
+        img.onclick = () => this.openImagePreview(img.src, item.server_desc || '截图预览');
+        imgBox.appendChild(img);
+        
+        const infoBox = document.createElement('div');
+        infoBox.className = 'evidence-info-box';
+        
+        const label = document.createElement('label');
+        label.innerText = '服务器描述:';
+        label.style.marginBottom = '5px';
+        
+        const textarea = document.createElement('textarea');
+        textarea.rows = 4;
+        textarea.className = 'evidence-textarea';
+        textarea.placeholder = '如：172.28.250.4 教师工作平台';
+        textarea.value = item.server_desc || '';
+        textarea.addEventListener('input', (e) => { item.server_desc = e.target.value; });
+        
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.innerText = '删除';
+        delBtn.className = 'btn-delete';
+        delBtn.style.marginTop = '25px';
+        delBtn.style.alignSelf = 'flex-start';
+        delBtn.onclick = () => {
+            const idx = group.items.indexOf(item);
+            if (idx > -1) group.items.splice(idx, 1);
+            wrapper.remove();
+        };
+        
+        infoBox.appendChild(label);
+        infoBox.appendChild(textarea);
+        
+        wrapper.appendChild(imgBox);
+        wrapper.appendChild(infoBox);
+        wrapper.appendChild(delBtn);
+        container.appendChild(wrapper);
+    },
+
     // 处理 URL 自动解析（ICP 查询）
     async handleUrlProcess(url) {
         try {
@@ -819,7 +956,7 @@ window.AppFormRenderer = {
         }
     },
 
-    handleChange(field, value) {
+    handleChange(field, value, triggerEvent = 'change') {
         if (this.currentSchema) {
             this.currentSchema.fields.forEach(f => {
                 if (f.computed && f.compute_from === field.key && f.compute_rule) {
@@ -827,8 +964,22 @@ window.AppFormRenderer = {
                 }
             });
         }
-        const beh = this.behaviors[field.key];
-        if (beh && beh.actions) this.runActions(beh.actions, value);
+
+        const trigger = String(triggerEvent || 'change').toLowerCase();
+        const fieldBehaviors = this.behaviors[field.key];
+        if (fieldBehaviors) {
+            const behaviorList = Array.isArray(fieldBehaviors) ? fieldBehaviors : [fieldBehaviors];
+            behaviorList.forEach((beh) => {
+                const expectedEvent = String(
+                    (beh && beh.trigger && beh.trigger.event)
+                    || beh?.trigger_event
+                    || 'change'
+                ).toLowerCase();
+                if (expectedEvent === trigger && beh.actions) {
+                    this.runActions(beh.actions, value);
+                }
+            });
+        }
         
         // 漏洞数量变化时自动计算漏洞总数和风险评级
         const vulnCountFields = ['vuln_count_critical', 'vuln_count_high', 'vuln_count_medium', 'vuln_count_low', 'vuln_count_info'];
@@ -845,6 +996,73 @@ window.AppFormRenderer = {
                     this.applyPresets(riskField.presets[riskLevel]);
                 }
             }
+        }
+        
+        // 配置驱动的字段联动 - 替代硬编码的模板判断
+        this.handleDependentFieldUpdate(field.key, value);
+    },
+
+    resolveBehaviorTemplate(value) {
+        if (typeof value === 'string') {
+            return value.replace(/\$\{(\w+)\}/g, (_, key) => this.formData[key] || '');
+        }
+        if (Array.isArray(value)) {
+            return value.map((item) => this.resolveBehaviorTemplate(item));
+        }
+        if (value && typeof value === 'object') {
+            const resolved = {};
+            Object.entries(value).forEach(([k, v]) => {
+                resolved[k] = this.resolveBehaviorTemplate(v);
+            });
+            return resolved;
+        }
+        return value;
+    },
+    
+    // 配置驱动的字段联动更新
+    handleDependentFieldUpdate(triggerKey, value) {
+        const dependentFields = this.currentSchema?.dependent_fields;
+        if (!dependentFields) return;
+        
+        // 遍历所有依赖字段配置
+        for (const [targetKey, config] of Object.entries(dependentFields)) {
+            // 检查是否由当前字段触发
+            const triggers = config.trigger_fields || [config.trigger_field];
+            if (!triggers.includes(triggerKey)) continue;
+            
+            // 如果是自动生成类型，调用对应的生成方法
+            if (config.auto_generate) {
+                this.updateAutoGeneratedField(targetKey, config);
+            } else if (config.template) {
+                // 模板替换类型
+                this.updateTemplateField(targetKey, config.template);
+            }
+        }
+    },
+    
+    // 更新模板字段（替换占位符）
+    updateTemplateField(targetKey, template) {
+        const el = document.getElementById(targetKey);
+        if (!el) return;
+        
+        const rendered = template.replace(/\$\{(\w+)\}/g, (_, key) => this.formData[key] || '');
+        el.value = rendered;
+        this.formData[targetKey] = rendered;
+    },
+    
+    // 更新自动生成字段（如报告总结）
+    updateAutoGeneratedField(targetKey, config) {
+        if (targetKey === 'report_conclusion') {
+            this.updateReportConclusion();
+        }
+    },
+    
+    // 更新指定字段中的占位符
+    updatePlaceholderInField(fieldKey, placeholder, newValue) {
+        const el = document.getElementById(fieldKey);
+        if (el && el.value && el.value.includes(placeholder)) {
+            el.value = el.value.replace(new RegExp(placeholder, 'g'), newValue || '');
+            this.formData[fieldKey] = el.value;
         }
     },
 
@@ -898,8 +1116,30 @@ window.AppFormRenderer = {
                 }
             } else if (a.type === 'api_call' && a.endpoint) {
                 try {
-                    let ep = a.endpoint.replace(/\${(\w+)}/g, (_, k) => this.formData[k] || '');
-                    const data = await AppAPI._request(ep);
+                    let ep = this.resolveBehaviorTemplate(a.endpoint);
+                    const hasParams = a.params && typeof a.params === 'object' && Object.keys(a.params).length > 0;
+                    const payload = hasParams ? this.resolveBehaviorTemplate(a.params) : null;
+                    const method = String(a.method || (payload ? 'POST' : 'GET')).toUpperCase();
+
+                    if (method === 'GET' && payload) {
+                        const search = new URLSearchParams();
+                        Object.entries(payload).forEach(([key, raw]) => {
+                            if (raw === undefined || raw === null) {
+                                return;
+                            }
+                            if (Array.isArray(raw) || (raw && typeof raw === 'object')) {
+                                search.append(key, JSON.stringify(raw));
+                                return;
+                            }
+                            search.append(key, String(raw));
+                        });
+                        const query = search.toString();
+                        if (query) {
+                            ep += (ep.includes('?') ? '&' : '?') + query;
+                        }
+                    }
+
+                    const data = await AppAPI._request(ep, method, method === 'GET' ? null : payload);
                     if (a.result_mapping) {
                         Object.entries(a.result_mapping).forEach(([src, tgt]) => {
                             const v = src.split('.').reduce((o, p) => o && o[p], data);
@@ -1067,6 +1307,10 @@ window.AppFormRenderer = {
                 }
                 // vuln_list 类型：数据已在 formData 中
                 if (f.type === 'vuln_list') {
+                    return;
+                }
+                // array 类型：数据已在 formData 中
+                if (f.type === 'array') {
                     return;
                 }
                 // checkbox_group 类型：将选中的 ID 转换为描述文本
@@ -1273,6 +1517,806 @@ window.AppFormRenderer = {
         this.formData[fieldKey].forEach((data, idx) => {
             // 数据已经通过 splice 正确更新
         });
+    },
+
+    // 创建通用数组字段
+    createArrayField(field) {
+        const container = document.createElement('div');
+        container.className = 'array-field-container';
+        container.id = field.key;
+        
+        // 初始化数据
+        if (!this.formData[field.key]) {
+            this.formData[field.key] = [];
+        }
+        
+        // 表格容器
+        const tableWrapper = document.createElement('div');
+        tableWrapper.className = 'array-table-wrapper';
+        tableWrapper.style.cssText = 'overflow-x: auto; margin-bottom: 10px;';
+        
+        // 创建表格
+        const table = document.createElement('table');
+        table.className = 'array-field-table';
+        table.style.cssText = 'width: 100%; border-collapse: collapse; font-size: 14px;';
+        
+        // 表头
+        const thead = document.createElement('thead');
+        const headerRow = document.createElement('tr');
+        
+        // 编号列
+        const thNum = document.createElement('th');
+        thNum.style.cssText = 'width: 50px; padding: 8px; border: 1px solid #ddd; background: #f5f5f5;';
+        thNum.textContent = '编号';
+        headerRow.appendChild(thNum);
+        
+        // 根据 columns 配置生成表头
+        if (field.columns && Array.isArray(field.columns)) {
+            field.columns.forEach(col => {
+                const th = document.createElement('th');
+                const width = col.width || 'auto';
+                th.style.cssText = `width: ${width}; padding: 8px; border: 1px solid #ddd; background: #f5f5f5;`;
+                th.textContent = col.label || col.key;
+                headerRow.appendChild(th);
+            });
+        }
+        
+        // 操作列
+        const thAction = document.createElement('th');
+        thAction.style.cssText = 'width: 60px; padding: 8px; border: 1px solid #ddd; background: #f5f5f5;';
+        thAction.textContent = '操作';
+        headerRow.appendChild(thAction);
+        
+        thead.appendChild(headerRow);
+        table.appendChild(thead);
+        
+        // 表体
+        const tbody = document.createElement('tbody');
+        tbody.id = `${field.key}_tbody`;
+        table.appendChild(tbody);
+        
+        tableWrapper.appendChild(table);
+        container.appendChild(tableWrapper);
+        
+        // 按钮容器
+        const btnContainer = document.createElement('div');
+        btnContainer.style.cssText = 'display: flex; gap: 10px;';
+        
+        // 添加按钮
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'btn btn-secondary';
+        addBtn.style.cssText = 'padding: 6px 15px; font-size: 13px;';
+        addBtn.innerHTML = `+ 添加${field.label || '记录'}`;
+        addBtn.onclick = () => this.addArrayRow(field.key, field);
+        btnContainer.appendChild(addBtn);
+        
+        // 批量导入按钮
+        const batchBtn = document.createElement('button');
+        batchBtn.type = 'button';
+        batchBtn.className = 'btn btn-secondary';
+        batchBtn.style.cssText = 'padding: 6px 15px; font-size: 13px; background: #52c41a; color: white;';
+        batchBtn.innerHTML = '📋 批量导入';
+        batchBtn.onclick = () => this.openBatchImportModal(field);
+        btnContainer.appendChild(batchBtn);
+        
+        container.appendChild(btnContainer);
+        
+        // 默认添加一行
+        setTimeout(() => this.addArrayRow(field.key, field), 0);
+        
+        return container;
+    },
+
+    // 添加数组字段行
+    addArrayRow(fieldKey, field) {
+        const tbody = document.getElementById(`${fieldKey}_tbody`);
+        if (!tbody) return;
+        
+        const rowIndex = this.formData[fieldKey].length;
+        const rowData = {};
+        
+        // 初始化行数据
+        if (field.columns && Array.isArray(field.columns)) {
+            field.columns.forEach(col => {
+                rowData[col.key] = col.default || '';
+            });
+        }
+        
+        this.formData[fieldKey].push(rowData);
+        
+        const tr = document.createElement('tr');
+        tr.dataset.index = rowIndex;
+        
+        // 编号列
+        const tdNum = document.createElement('td');
+        tdNum.style.cssText = 'padding: 6px; border: 1px solid #ddd; text-align: center;';
+        tdNum.textContent = rowIndex + 1;
+        tr.appendChild(tdNum);
+        
+        // 根据 columns 配置生成单元格
+        if (field.columns && Array.isArray(field.columns)) {
+            field.columns.forEach(col => {
+                tr.appendChild(this.createArrayCell(fieldKey, rowIndex, col, rowData));
+            });
+        }
+        
+        // 删除按钮
+        const tdDel = document.createElement('td');
+        tdDel.style.cssText = 'padding: 6px; border: 1px solid #ddd; text-align: center;';
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'btn-mini';
+        delBtn.style.cssText = 'background: #ff4d4f; color: white; border: none; padding: 4px 8px; cursor: pointer; border-radius: 3px;';
+        delBtn.textContent = '删除';
+        delBtn.onclick = () => {
+            const currentIdx = parseInt(tr.dataset.index);
+            this.removeArrayRow(fieldKey, tr, currentIdx);
+        };
+        tdDel.appendChild(delBtn);
+        tr.appendChild(tdDel);
+        
+        tbody.appendChild(tr);
+        
+        // 触发汇总更新
+        this.updateControlledServersSummary(fieldKey);
+        this.updateDbConnectionSummary(fieldKey);
+        this.updateDataStatisticsSummary(fieldKey);
+        this.updateReportConclusion();
+    },
+
+    // 创建数组字段单元格
+    createArrayCell(fieldKey, rowIndex, col, rowData) {
+        const td = document.createElement('td');
+        td.style.cssText = 'padding: 4px; border: 1px solid #ddd;';
+        
+        if (col.type === 'select') {
+            // 下拉框
+            const select = document.createElement('select');
+            select.style.cssText = 'width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 3px; box-sizing: border-box;';
+            
+            // 添加选项
+            if (col.options && Array.isArray(col.options)) {
+                col.options.forEach(opt => {
+                    const option = document.createElement('option');
+                    option.value = typeof opt === 'object' ? opt.value : opt;
+                    option.textContent = typeof opt === 'object' ? (opt.label || opt.value) : opt;
+                    if (option.value === rowData[col.key]) {
+                        option.selected = true;
+                    }
+                    select.appendChild(option);
+                });
+            }
+            
+            select.addEventListener('change', (e) => {
+                rowData[col.key] = e.target.value;
+                // 类型变更时触发汇总更新
+                if (col.key === 'server_type') {
+                    this.updateControlledServersSummary(fieldKey);
+                }
+                if (col.key === 'db_type') {
+                    this.updateDbConnectionSummary(fieldKey);
+                }
+            });
+            
+            td.appendChild(select);
+        } else if (col.type === 'textarea') {
+            // 多行文本框
+            const textarea = document.createElement('textarea');
+            textarea.style.cssText = 'width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 3px; box-sizing: border-box; resize: vertical; min-height: 60px;';
+            textarea.placeholder = col.placeholder || '';
+            textarea.value = rowData[col.key] || '';
+            textarea.rows = col.rows || 3;
+            
+            textarea.addEventListener('input', (e) => {
+                rowData[col.key] = e.target.value;
+            });
+            
+            td.appendChild(textarea);
+        } else if (col.type === 'image') {
+            // 图片上传
+            td.appendChild(this.createArrayImageCell(fieldKey, rowIndex, col, rowData));
+        } else {
+            // 文本输入框（默认）
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.style.cssText = 'width: 100%; padding: 6px; border: 1px solid #ccc; border-radius: 3px; box-sizing: border-box;';
+            input.placeholder = col.placeholder || '';
+            input.value = rowData[col.key] || '';
+            
+            input.addEventListener('input', (e) => {
+                rowData[col.key] = e.target.value;
+                // 数据统计字段变更时触发汇总更新
+                if (col.key === 'data_type' || col.key === 'data_count') {
+                    this.updateDataStatisticsSummary(fieldKey);
+                    this.updateReportConclusion();
+                }
+            });
+            
+            td.appendChild(input);
+        }
+        
+        return td;
+    },
+    
+    // 创建数组字段中的图片上传单元格
+    createArrayImageCell(fieldKey, rowIndex, col, rowData) {
+        const self = this;
+        const container = document.createElement('div');
+        container.className = 'array-image-cell';
+        container.style.cssText = 'display: flex; flex-direction: column; gap: 5px; min-width: 120px;';
+        
+        // 预览区域
+        const preview = document.createElement('div');
+        preview.className = 'array-image-preview';
+        preview.style.cssText = 'width: 100%; min-height: 60px; border: 1px dashed #ccc; border-radius: 4px; display: flex; align-items: center; justify-content: center; cursor: pointer; background: #fafafa;';
+        
+        // 如果已有图片，显示预览
+        if (rowData[col.key]) {
+            const img = document.createElement('img');
+            img.src = `${window.AppAPI.BASE_URL}/temp/${rowData[col.key].split('/').pop()}`;
+            img.style.cssText = 'max-width: 100%; max-height: 80px; object-fit: contain;';
+            img.onclick = () => this.openImagePreview(img.src, col.label || '图片预览');
+            preview.appendChild(img);
+        } else {
+            preview.innerHTML = '<span style="color: #999; font-size: 12px;">点击上传</span>';
+        }
+        
+        // 按钮区域
+        const btnRow = document.createElement('div');
+        btnRow.style.cssText = 'display: flex; gap: 5px;';
+        
+        // 上传按钮
+        const uploadBtn = document.createElement('button');
+        uploadBtn.type = 'button';
+        uploadBtn.className = 'btn-mini';
+        uploadBtn.style.cssText = 'flex: 1; padding: 4px 8px; font-size: 11px; background: #1890ff; color: white; border: none; border-radius: 3px; cursor: pointer;';
+        uploadBtn.textContent = '上传';
+        
+        // 粘贴按钮
+        const pasteBtn = document.createElement('button');
+        pasteBtn.type = 'button';
+        pasteBtn.className = 'btn-mini';
+        pasteBtn.style.cssText = 'flex: 1; padding: 4px 8px; font-size: 11px; background: #52c41a; color: white; border: none; border-radius: 3px; cursor: pointer;';
+        pasteBtn.textContent = '粘贴';
+        
+        // 上传点击事件
+        const handleUpload = () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = col.accept || 'image/*';
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const result = await self.uploadImage(file);
+                    if (result) {
+                        rowData[col.key] = result.file_path;
+                        self.updateArrayImagePreview(preview, result, col);
+                    }
+                }
+            };
+            input.click();
+        };
+        
+        preview.onclick = handleUpload;
+        uploadBtn.onclick = handleUpload;
+        
+        // 粘贴点击事件
+        pasteBtn.onclick = async () => {
+            try {
+                const items = await navigator.clipboard.read();
+                for (const item of items) {
+                    const imgType = item.types.find(t => t.startsWith('image/'));
+                    if (imgType) {
+                        const blob = await item.getType(imgType);
+                        const result = await self.uploadImage(blob);
+                        if (result) {
+                            rowData[col.key] = result.file_path;
+                            self.updateArrayImagePreview(preview, result, col);
+                        }
+                        break;
+                    }
+                }
+            } catch (err) {
+                if (window.AppUtils) AppUtils.showToast('无法读取剪贴板', 'error');
+            }
+        };
+        
+        btnRow.appendChild(uploadBtn);
+        btnRow.appendChild(pasteBtn);
+        
+        container.appendChild(preview);
+        container.appendChild(btnRow);
+        
+        return container;
+    },
+    
+    // 更新数组字段中的图片预览
+    updateArrayImagePreview(preview, imageInfo, col) {
+        const fullUrl = `${window.AppAPI.BASE_URL}${imageInfo.url}`;
+        preview.innerHTML = '';
+        // 移除预览区域的上传点击事件
+        preview.onclick = null;
+        preview.style.cursor = 'default';
+        
+        const img = document.createElement('img');
+        img.src = fullUrl;
+        img.style.cssText = 'max-width: 100%; max-height: 80px; object-fit: contain; cursor: pointer;';
+        img.onclick = (e) => {
+            e.stopPropagation(); // 阻止冒泡
+            this.openImagePreview(img.src, col.label || '图片预览');
+        };
+        preview.appendChild(img);
+    },
+    
+    // 打开批量导入弹窗
+    openBatchImportModal(field) {
+        // 确保弹窗存在
+        this.ensureBatchImportModal();
+        
+        const modal = document.getElementById('batch-import-modal');
+        const textarea = document.getElementById('batch-import-textarea');
+        const confirmBtn = document.getElementById('batch-import-confirm');
+        const formatHint = document.getElementById('batch-import-format');
+        
+        // 生成格式提示
+        const colNames = (field.columns || []).map(c => c.label || c.key).join(' | ');
+        formatHint.textContent = `格式：${colNames}（每行一条，支持Tab/逗号/分号分隔）`;
+        
+        // 清空文本框
+        textarea.value = '';
+        
+        // 绑定确认事件
+        confirmBtn.onclick = () => {
+            this.processBatchImport(field, textarea.value);
+            modal.style.display = 'none';
+        };
+        
+        modal.style.display = 'flex';
+        textarea.focus();
+    },
+    
+    // 确保批量导入弹窗存在
+    ensureBatchImportModal() {
+        if (document.getElementById('batch-import-modal')) return;
+        
+        const modal = document.createElement('div');
+        modal.id = 'batch-import-modal';
+        modal.style.cssText = 'display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 10000; align-items: center; justify-content: center;';
+        
+        modal.innerHTML = `
+            <div style="background: white; border-radius: 8px; padding: 20px; width: 600px; max-width: 90%; max-height: 80vh; overflow: auto;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0;">📋 批量导入</h3>
+                    <button type="button" id="batch-import-close" style="background: none; border: none; font-size: 20px; cursor: pointer;">&times;</button>
+                </div>
+                <p id="batch-import-format" style="color: #666; font-size: 13px; margin-bottom: 10px;"></p>
+                <textarea id="batch-import-textarea" rows="10" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-family: monospace; font-size: 13px; box-sizing: border-box;" placeholder="粘贴数据，每行一条记录..."></textarea>
+                <div style="margin-top: 15px; text-align: right;">
+                    <button type="button" id="batch-import-cancel" class="btn btn-secondary" style="margin-right: 10px;">取消</button>
+                    <button type="button" id="batch-import-confirm" class="btn btn-primary">导入</button>
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // 绑定关闭事件
+        document.getElementById('batch-import-close').onclick = () => modal.style.display = 'none';
+        document.getElementById('batch-import-cancel').onclick = () => modal.style.display = 'none';
+        modal.onclick = (e) => { if (e.target === modal) modal.style.display = 'none'; };
+    },
+    
+    // 处理批量导入数据
+    processBatchImport(field, text) {
+        if (!text.trim()) return;
+        
+        const lines = text.trim().split('\n');
+        const columns = field.columns || [];
+        let importedCount = 0;
+        
+        lines.forEach(line => {
+            line = line.trim();
+            if (!line) return;
+            
+            // 智能分隔：优先Tab，其次逗号，再次分号，最后多空格
+            let values;
+            if (line.includes('\t')) {
+                values = line.split('\t');
+            } else if (line.includes(',')) {
+                values = line.split(',');
+            } else if (line.includes(';')) {
+                values = line.split(';');
+            } else {
+                values = line.split(/\s{2,}|\s+/);
+            }
+            
+            // 构建行数据
+            const rowData = {};
+            columns.forEach((col, idx) => {
+                let val = (values[idx] || '').trim();
+                // 对于 select 类型，尝试匹配选项
+                if (col.type === 'select' && col.options && val) {
+                    const matched = col.options.find(opt => {
+                        const optVal = typeof opt === 'object' ? opt.value : opt;
+                        const optLabel = typeof opt === 'object' ? (opt.label || opt.value) : opt;
+                        return optVal.toLowerCase() === val.toLowerCase() || 
+                               optLabel.toLowerCase() === val.toLowerCase();
+                    });
+                    if (matched) {
+                        val = typeof matched === 'object' ? matched.value : matched;
+                    }
+                }
+                rowData[col.key] = val || col.default || '';
+            });
+            
+            // 添加到表格
+            this.addArrayRowWithData(field.key, field, rowData);
+            importedCount++;
+        });
+        
+        // 批量导入后触发汇总更新
+        this.updateControlledServersSummary(field.key);
+        
+        if (window.AppUtils) {
+            AppUtils.showToast(`成功导入 ${importedCount} 条记录`, 'success');
+        }
+    },
+    
+    // 添加带数据的数组行
+    addArrayRowWithData(fieldKey, field, rowData) {
+        const tbody = document.getElementById(`${fieldKey}_tbody`);
+        if (!tbody) return;
+        
+        const rowIndex = this.formData[fieldKey].length;
+        this.formData[fieldKey].push(rowData);
+        
+        const tr = document.createElement('tr');
+        tr.dataset.index = rowIndex;
+        
+        // 编号列
+        const tdNum = document.createElement('td');
+        tdNum.style.cssText = 'padding: 6px; border: 1px solid #ddd; text-align: center;';
+        tdNum.textContent = rowIndex + 1;
+        tr.appendChild(tdNum);
+        
+        // 根据 columns 配置生成单元格
+        if (field.columns && Array.isArray(field.columns)) {
+            field.columns.forEach(col => {
+                tr.appendChild(this.createArrayCell(fieldKey, rowIndex, col, rowData));
+            });
+        }
+        
+        // 删除按钮
+        const tdDel = document.createElement('td');
+        tdDel.style.cssText = 'padding: 6px; border: 1px solid #ddd; text-align: center;';
+        const delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'btn-mini';
+        delBtn.style.cssText = 'background: #ff4d4f; color: white; border: none; padding: 4px 8px; cursor: pointer; border-radius: 3px;';
+        delBtn.textContent = '删除';
+        delBtn.onclick = () => {
+            const currentIdx = parseInt(tr.dataset.index);
+            this.removeArrayRow(fieldKey, tr, currentIdx);
+        };
+        tdDel.appendChild(delBtn);
+        tr.appendChild(tdDel);
+        
+        tbody.appendChild(tr);
+    },
+
+    // 删除数组字段行
+    removeArrayRow(fieldKey, tr, rowIndex) {
+        const tbody = tr.parentElement;
+        
+        // 从数据中移除
+        this.formData[fieldKey].splice(rowIndex, 1);
+        
+        // 从 DOM 中移除
+        tr.remove();
+        
+        // 重新编号
+        const rows = tbody.querySelectorAll('tr');
+        rows.forEach((row, idx) => {
+            row.dataset.index = idx;
+            row.cells[0].textContent = idx + 1;
+        });
+        
+        // 触发汇总更新
+        this.updateControlledServersSummary(fieldKey);
+        this.updateDbConnectionSummary(fieldKey);
+        this.updateDataStatisticsSummary(fieldKey);
+        this.updateReportConclusion();
+    },
+    
+    // ========== 通用汇总计算器 ==========
+    
+    /**
+     * 通用计数汇总生成器
+     * @param {Array} items - 数据列表
+     * @param {string} typeKey - 类型字段名
+     * @param {Object} config - 汇总配置 {type_names, template_zero, template_with_data, connector, last_connector}
+     * @returns {string} 汇总描述
+     */
+    generateCountSummary(items, typeKey, config) {
+        if (!items || items.length === 0) {
+            return config.template_zero;
+        }
+        
+        // 统计各类型数量
+        const typeCounts = {};
+        items.forEach(item => {
+            const t = item[typeKey] || '其他';
+            typeCounts[t] = (typeCounts[t] || 0) + 1;
+        });
+        
+        // 生成描述部分
+        const parts = [];
+        for (const [type, count] of Object.entries(typeCounts)) {
+            if (count > 0) {
+                const name = config.type_names?.[type] || `${type}实例`;
+                parts.push(`${count}个${name}`);
+            }
+        }
+        
+        if (parts.length === 0) return config.template_zero;
+        
+        const connector = config.connector || '、';
+        const lastConnector = config.last_connector || '以及';
+        
+        let detail = '';
+        if (parts.length === 1) {
+            detail = parts[0];
+        } else {
+            detail = parts.slice(0, -1).join(connector) + lastConnector + parts[parts.length - 1];
+        }
+        
+        return config.template_with_data
+            .replace('{total}', items.length)
+            .replace('{detail}', detail);
+    },
+    
+    /**
+     * 通用数据量汇总生成器
+     * @param {Array} items - 数据列表
+     * @param {string} typeKey - 类型字段名
+     * @param {string} countKey - 数量字段名
+     * @param {Object} config - 汇总配置
+     * @returns {{summary: string, total: number}}
+     */
+    generateDataSummary(items, typeKey, countKey, config) {
+        if (!items || items.length === 0) {
+            return { summary: config.template_zero, total: 0 };
+        }
+        
+        // 按类型汇总数量
+        const typeTotals = {};
+        let grandTotal = 0;
+        
+        items.forEach(item => {
+            const dataType = item[typeKey] || '未知类型';
+            const countStr = String(item[countKey] || '0').replace(/,/g, '');
+            const count = parseInt(countStr, 10) || 0;
+            typeTotals[dataType] = (typeTotals[dataType] || 0) + count;
+            grandTotal += count;
+        });
+        
+        if (grandTotal === 0) {
+            return { summary: config.template_zero, total: 0 };
+        }
+        
+        const parts = Object.entries(typeTotals)
+            .map(([type, total]) => `${type}共计${total.toLocaleString()}条`);
+        
+        const detail = parts.join(config.connector || '，');
+        const summary = config.template_with_data
+            .replace('{total}', grandTotal.toLocaleString())
+            .replace('{detail}', detail);
+        
+        return { summary, total: grandTotal };
+    },
+    
+    /**
+     * 配置驱动的汇总更新
+     * @param {string} summaryKey - 汇总字段名
+     */
+    updateSummaryFromConfig(summaryKey) {
+        const summaryConfigs = this.currentSchema?.summary_configs;
+        if (!summaryConfigs?.[summaryKey]) return;
+        
+        const config = summaryConfigs[summaryKey];
+        const items = this.formData[config.source_field] || [];
+        const summaryEl = document.getElementById(summaryKey);
+        if (!summaryEl) return;
+        
+        let summary = '';
+        
+        if (config.mode === 'count') {
+            summary = this.generateCountSummary(items, config.type_key, config);
+        } else if (config.mode === 'data') {
+            const result = this.generateDataSummary(items, config.type_key, config.count_key, config);
+            summary = result.summary;
+            if (config.total_field) {
+                this.formData[config.total_field] = result.total;
+            }
+        }
+        
+        summaryEl.value = summary;
+        this.formData[summaryKey] = summary;
+    },
+    
+    // 更新可控服务器汇总描述（前端实时预览）
+    updateControlledServersSummary(fieldKey) {
+        if (fieldKey !== 'controlled_servers') return;
+        
+        // 优先使用配置驱动
+        if (this.currentSchema?.summary_configs?.controlled_servers_summary) {
+            this.updateSummaryFromConfig('controlled_servers_summary');
+            return;
+        }
+        
+        // 兼容旧逻辑
+        const servers = this.formData['controlled_servers'] || [];
+        const summaryEl = document.getElementById('controlled_servers_summary');
+        if (!summaryEl) return;
+        
+        const config = {
+            type_names: {
+                'SSH': 'SSH服务实例', 'RDP': 'RDP服务实例',
+                'FTP': 'FTP服务实例', 'Telnet': 'Telnet服务实例', '其他': '其他服务实例'
+            },
+            template_zero: '通过对内网已控服务器进行信息收集和敏感文件分析，未发现可控服务连接信息。',
+            template_with_data: '通过对内网已控服务器进行信息收集和敏感文件分析，发现了以下服务连接信息：统计结果显示共有{total}个可控主机，其中包括{detail}。'
+        };
+        
+        const summary = this.generateCountSummary(servers, 'server_type', config);
+        summaryEl.value = summary;
+        this.formData['controlled_servers_summary'] = summary;
+    },
+
+    // 更新数据库连接信息汇总描述（前端实时预览）
+    updateDbConnectionSummary(fieldKey) {
+        if (fieldKey !== 'db_connections') return;
+        
+        // 优先使用配置驱动
+        if (this.currentSchema?.summary_configs?.db_connection_summary) {
+            this.updateSummaryFromConfig('db_connection_summary');
+            return;
+        }
+        
+        // 兼容旧逻辑
+        const connections = this.formData['db_connections'] || [];
+        const summaryEl = document.getElementById('db_connection_summary');
+        if (!summaryEl) return;
+        
+        const config = {
+            type_names: {
+                'MySQL': 'MySQL服务实例', 'SqlServer': 'SqlServer服务实例',
+                'PostgreSQL': 'PostgreSQL服务实例', 'Oracle': 'Oracle服务实例',
+                'Redis': 'Redis服务实例', 'MongoDB': 'MongoDB服务实例', '其他': '其他数据库实例'
+            },
+            template_zero: '通过对内网已控服务器的信息收集和敏感文件收集，未发现数据库服务连接信息。',
+            template_with_data: '通过对内网已控服务器的信息收集和敏感文件收集，发现了以下数据库服务连接信息：统计结果显示共有{total}个数据库服务实例，其中包括{detail}。',
+            connector: '、',
+            last_connector: '和'
+        };
+        
+        const summary = this.generateCountSummary(connections, 'db_type', config);
+        summaryEl.value = summary;
+        this.formData['db_connection_summary'] = summary;
+    },
+
+    // 更新数据统计汇总描述（前端实时预览）
+    updateDataStatisticsSummary(fieldKey) {
+        if (fieldKey !== 'data_statistics') return;
+        
+        // 优先使用配置驱动
+        if (this.currentSchema?.summary_configs?.data_statistics_summary) {
+            this.updateSummaryFromConfig('data_statistics_summary');
+            return;
+        }
+        
+        // 兼容旧逻辑
+        const statistics = this.formData['data_statistics'] || [];
+        const summaryEl = document.getElementById('data_statistics_summary');
+        if (!summaryEl) return;
+        
+        const config = {
+            template_zero: '未发现敏感数据泄露。',
+            template_with_data: '根据统计，共泄露{total}条数据，其中{detail}。',
+            connector: '，'
+        };
+        
+        const result = this.generateDataSummary(statistics, 'data_type', 'data_count', config);
+        summaryEl.value = result.summary;
+        this.formData['data_statistics_summary'] = result.summary;
+        this.formData['total_data_count'] = result.total;
+    },
+
+    // 更新报告总结（前端实时预览）- 配置驱动
+    updateReportConclusion() {
+        // 检查是否有报告总结的配置
+        const config = this.currentSchema?.dependent_fields?.report_conclusion;
+        if (!config?.auto_generate) return;
+        
+        const conclusionEl = document.getElementById('report_conclusion');
+        if (!conclusionEl) return;
+        
+        const targetName = this.formData['target_name'] || 'XX单位';
+        
+        // 1. 统计有效高危漏洞数（按URL行数计算）
+        const internetVulns = this.formData['internet_vulns'] || [];
+        const intranetVulns = this.formData['intranet_vulns'] || [];
+        const allVulns = [...internetVulns, ...intranetVulns];
+        
+        let criticalCount = 0, highCount = 0;
+        const systems = new Set();
+        
+        allVulns.forEach(vuln => {
+            const level = vuln.vuln_level || '中危';
+            const vulnUrl = vuln.vuln_url || '';
+            const urlLines = vulnUrl.split('\n').filter(line => line.trim()).length;
+            const count = Math.max(1, urlLines);
+            
+            if (level === '超危') criticalCount += count;
+            else if (level === '高危') highCount += count;
+            
+            // 统计系统
+            const system = (vuln.vuln_system || '').trim();
+            if (system) systems.add(system);
+        });
+        
+        const effectiveHighVulns = criticalCount + highCount;
+        const systemCount = systems.size;
+        
+        // 2. 可控主机数
+        const servers = this.formData['controlled_servers'] || [];
+        const serverCount = servers.length;
+        
+        // 3. 数据库数
+        const dbConnections = this.formData['db_connections'] || [];
+        const dbCount = dbConnections.length;
+        
+        // 4. 泄露数据总条数
+        const totalDataCount = this.formData['total_data_count'] || 0;
+        
+        // 5. 数据类型
+        const dataStatistics = this.formData['data_statistics'] || [];
+        const dataTypes = new Set();
+        dataStatistics.forEach(stat => {
+            const dataType = (stat.data_type || '').trim();
+            if (dataType) dataTypes.add(dataType);
+        });
+        
+        // 6. 构建总结文本
+        const parts = [`${targetName}存在有效高危漏洞${effectiveHighVulns}个`];
+        
+        if (systemCount > 0) {
+            parts.push(`进入约${systemCount}个系统`);
+        }
+        
+        if (serverCount > 0) {
+            parts.push(`可控主机约${serverCount}台`);
+        }
+        
+        if (dbCount > 0) {
+            parts.push(`数据库${dbCount}个`);
+        }
+        
+        if (totalDataCount > 0) {
+            parts.push(`泄露数据约${totalDataCount.toLocaleString()}条`);
+        }
+        
+        let conclusion = '';
+        if (dataTypes.size > 0) {
+            const typeList = Array.from(dataTypes).sort().join('、');
+            conclusion = parts.join('，') + `，涉及${typeList}等。`;
+        } else {
+            conclusion = parts.join('，') + '。';
+        }
+        
+        conclusionEl.value = conclusion;
+        this.formData['report_conclusion'] = conclusion;
     },
 
     // 创建测试人员信息列表
@@ -1582,7 +2626,15 @@ window.AppFormRenderer = {
     setFieldValue(key, value) {
         this.formData[key] = value;
         const el = document.getElementById(key);
-        if (el) { el.value = value; el.dispatchEvent(new Event('change', {bubbles:true})); }
+        if (el) {
+            // textarea 和 input 都使用 value 属性
+            if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+                el.value = value;
+            } else if (el.tagName === 'SELECT') {
+                el.value = value;
+            }
+            el.dispatchEvent(new Event('change', {bubbles:true}));
+        }
     },
 
     // 应用预设值（用于风险等级联动填充）
@@ -1627,16 +2679,6 @@ window.AppFormRenderer = {
         // 确保 vuln_evidence_images 是数组格式
         if (data.vuln_evidence_images && !Array.isArray(data.vuln_evidence_images)) {
             data.vuln_evidence_images = [];
-        }
-        
-        // 如果动态表单没有图片数据，尝试从旧的 AppImage 模块获取（向后兼容）
-        if (window.AppImage) {
-            if (!data.vuln_evidence_images || data.vuln_evidence_images.length === 0) {
-                data.vuln_evidence_images = window.AppImage.vulnEvidenceList || [];
-            }
-            if (!data.icp_screenshot_path) {
-                data.icp_screenshot_path = window.AppImage.icpScreenshotPath || '';
-            }
         }
         
         // 检测是否为新漏洞（仅对 vuln_report 模板生效）
@@ -1737,7 +2779,9 @@ window.AppFormRenderer = {
                     if (mainContent) {
                         // 清空所有漏洞卡片，只保留空提示
                         const cards = mainContent.querySelectorAll('.vuln-item-card');
-                        cards.forEach(card => card.remove());
+                        cards.forEach((card) => {
+                            card.remove();
+                        });
                     }
                     // 显示空提示
                     if (emptyTip) emptyTip.style.display = 'block';
@@ -1747,7 +2791,9 @@ window.AppFormRenderer = {
                     // 取消所有复选框选中状态
                     if (el) {
                         const checkboxes = el.querySelectorAll('input[type="checkbox"]');
-                        checkboxes.forEach(cb => cb.checked = false);
+                        checkboxes.forEach((checkbox) => {
+                            checkbox.checked = false;
+                        });
                         // 清空关联的文本框
                         const textarea = el.querySelector('textarea');
                         if (textarea) textarea.value = '';
@@ -1794,12 +2840,6 @@ window.AppFormRenderer = {
         // 重新设置默认值
         if (this.currentSchema) {
             this.setDefaultValues(this.currentSchema);
-        }
-        
-        // 清空旧的 AppImage 模块数据（向后兼容）
-        if (window.AppImage) {
-            window.AppImage.icpScreenshotPath = null;
-            window.AppImage.vulnEvidenceList = [];
         }
         
         if (window.AppUtils) AppUtils.showToast('表单已重置', 'info');
@@ -2076,6 +3116,8 @@ window.AppFormRenderer = {
         
         // 更新漏洞统计
         this.updateVulnCounts();
+        // 更新报告总结（护网报告）
+        this.updateReportConclusion();
     },
 
     // 添加侧边栏项
@@ -2423,6 +3465,8 @@ window.AppFormRenderer = {
         
         // 更新漏洞统计
         this.updateVulnCounts();
+        // 更新报告总结（护网报告）
+        this.updateReportConclusion();
     },
 
     // 重新编号漏洞项
@@ -2495,6 +3539,7 @@ window.AppFormRenderer = {
             input.addEventListener('change', (e) => {
                 vulnData[key] = e.target.value;
                 this.updateVulnCounts();
+                this.updateReportConclusion();
             });
         } else if (type === 'textarea') {
             input = document.createElement('textarea');
@@ -2507,6 +3552,11 @@ window.AppFormRenderer = {
                 // URL/IP 字段变化时更新漏洞统计
                 if (key === 'vuln_url') {
                     this.updateVulnCounts();
+                    this.updateReportConclusion();
+                }
+                // 所属系统变化时更新报告总结
+                if (key === 'vuln_system') {
+                    this.updateReportConclusion();
                 }
             });
         } else {
