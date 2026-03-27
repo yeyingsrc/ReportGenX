@@ -5,9 +5,20 @@ const TOKEN_ERROR_PATTERN = /invalid application token|令牌不一致|token mis
 
 async function runSmoke() {
   const appPath = path.resolve(__dirname, '..')
+  const isGithubLinux = process.platform === 'linux' && process.env.GITHUB_ACTIONS === 'true'
+  const launchArgs = [appPath]
+  if (isGithubLinux) {
+    // Must be passed at process launch time for CI sandbox failures.
+    launchArgs.push('--no-sandbox', '--disable-setuid-sandbox')
+  }
+
   const electronApp = await electron.launch({
-    args: [appPath],
+    args: launchArgs,
     timeout: 120000,
+    env: {
+      ...process.env,
+      ...(isGithubLinux ? { ELECTRON_DISABLE_SANDBOX: '1' } : {})
+    }
   })
 
   let page
