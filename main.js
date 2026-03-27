@@ -10,6 +10,13 @@ let mainWindow = null
 let isQuitting = false
 const APP_API_TOKEN = crypto.randomBytes(24).toString('hex')
 
+// GitHub Actions Linux runners can fail to boot Electron sandbox reliably.
+// Keep this workaround scoped to Actions smoke runs only.
+if (process.platform === 'linux' && process.env.GITHUB_ACTIONS === 'true') {
+  app.commandLine.appendSwitch('no-sandbox')
+  app.commandLine.appendSwitch('disable-setuid-sandbox')
+}
+
 const sharedConfig = loadSharedConfig(app, __dirname)
 const SERVER_HOST = sharedConfig.server.host
 const SERVER_PORT = sharedConfig.server.port
