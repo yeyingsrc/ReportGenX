@@ -2,6 +2,10 @@
 
 一个用于生成安全报告的桌面应用，采用 **Electron 前端壳 + 本地 FastAPI 后端 + 模板插件系统**。
 
+> 维护状态：**已归档（只读）**
+>
+> 当前归档版本：`0.18.3`
+
 ## 核心能力
 
 - 模板驱动报告生成（`schema.yaml + handler.py + template.docx`）
@@ -133,6 +137,12 @@ CI 冒烟：
 ```bash
 pyinstaller --noconfirm backend/api.spec
 npm run dist
+```
+
+发布前版本一致性检查：
+
+```bash
+npm run check-version
 ```
 
 常用目标：

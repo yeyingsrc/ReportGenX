@@ -11,6 +11,7 @@ from PyInstaller.utils.hooks import collect_data_files
 # SPECPATH is injected by PyInstaller when executing this spec file.
 # Fallback keeps static analyzers/editor diagnostics working.
 SPEC_DIR = globals().get('SPECPATH') or os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SPEC_DIR)
 HOOKS_DIR = os.path.join(SPEC_DIR, 'hooks')
 RUNTIME_HOOK = os.path.join(HOOKS_DIR, 'runtime_hook_docx.py')
 
@@ -24,12 +25,13 @@ app_datas = [
 ]
 
 a = Analysis([os.path.join(SPEC_DIR, 'api.py')],
-             pathex=[SPEC_DIR],
+             pathex=[SPEC_DIR, PROJECT_ROOT],
              binaries=[],
              datas=app_datas,  # 包含所有必需的数据文件
-              hiddenimports=[
-                  # Core modules used by dynamic templates
-                  'core.document_editor',
+               hiddenimports=[
+                   'core',
+                   # Core modules used by dynamic templates
+                   'core.document_editor',
                   'core.document_image_processor',
                   'core.exceptions',
                   'core.report_merger',

@@ -38,6 +38,11 @@ window.addEventListener('DOMContentLoaded', async () => {
             const sharedVersion = normalizeVersion(versionInfo.shared_version || '');
             const electronVersion = normalizeVersion(window.electronConfig && window.electronConfig.appVersion);
 
+            if (electronVersion === '0.0.0' && backendVersion && backendVersion !== '0.0.0') {
+                showVersionWarning(`版本异常：桌面端 ${electronVersion} / 后端 ${backendVersion}。通常是打包未包含 backend/shared-config.json，请重新打包发布。`);
+                return;
+            }
+
             if (electronVersion && backendVersion && electronVersion !== backendVersion) {
                 showVersionWarning(`版本不一致：桌面端 ${electronVersion} / 后端 ${backendVersion}。建议重新构建并发布。`);
                 return;

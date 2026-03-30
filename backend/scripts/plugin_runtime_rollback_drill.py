@@ -25,8 +25,9 @@ PACKAGED_API_CANDIDATES = (
     BACKEND_DIR / "dist" / "api" / "api.exe",
     BACKEND_DIR / "dist" / "api" / "api",
 )
-TEMPLATES_URL = "http://127.0.0.1:8000/api/templates"
-GENERATE_URL = "http://127.0.0.1:8000/api/templates/intrusion_report/generate"
+HEALTH_PATH = "/api/health"
+TEMPLATES_PATH = "/api/templates"
+GENERATE_PATH = "/api/templates/intrusion_report/generate"
 FORBIDDEN_MARKERS = (
     "No handler registered for template",
     "No module named",
@@ -71,8 +72,9 @@ SCENARIOS = [
 
 
 class ApiProcess:
-    def __init__(self, exe_path: Path) -> None:
+    def __init__(self, exe_path: Path, ready_url: str) -> None:
         self.exe_path = exe_path
+        self.ready_url = ready_url
         self.proc: subprocess.Popen[str] | None = None
         self._reader_thread: threading.Thread | None = None
         self.log_lines: List[str] = []
@@ -97,13 +99,13 @@ class ApiProcess:
         for line in self.proc.stdout:
             self.log_lines.append(line.rstrip("\n"))
 
-    def wait_until_ready(self, timeout_seconds: int = 30) -> bool:
+    def wait_until_ready(self, timeout_seconds: int = 60) -> bool:
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
             if self.proc is not None and self.proc.poll() is not None:
                 return False
             try:
-                response = requests.get(TEMPLATES_URL, timeout=2)
+                response = requests.get(self.ready_url, timeout=2)
                 if response.status_code == 200:
                     return True
             except Exception:
@@ -150,6 +152,23 @@ def _write_runtime_config(base_config: Dict[str, Any], scenario: DrillScenario) 
         fh.write("\n")
 
 
+def _build_base_url(base_config: Dict[str, Any]) -> str:
+    server = base_config.get("server", {})
+    host = str(server.get("host", "127.0.0.1") or "127.0.0.1")
+    if host == "0.0.0.0":
+        host = "127.0.0.1"
+
+    port_raw = server.get("port", 8000)
+    try:
+        port = int(port_raw)
+    except (TypeError, ValueError):
+        port = 8000
+    if port < 1 or port > 65535:
+        port = 8000
+
+    return f"http://{host}:{port}"
+
+
 def _contains_forbidden(text: str) -> bool:
     return any(marker in text for marker in FORBIDDEN_MARKERS)
 
@@ -160,8 +179,12 @@ def _run_scenario(
     packaged_api_binary: Path,
 ) -> Dict[str, Any]:
     _write_runtime_config(base_config, scenario)
+    base_url = _build_base_url(base_config)
+    health_url = f"{base_url}{HEALTH_PATH}"
+    templates_url = f"{base_url}{TEMPLATES_PATH}"
+    generate_url = f"{base_url}{GENERATE_PATH}"
 
-    session = ApiProcess(packaged_api_binary)
+    session = ApiProcess(packaged_api_binary, health_url)
     result: Dict[str, Any] = {
         "scenario": scenario.name,
         "ready": False,
@@ -177,18 +200,18 @@ def _run_scenario(
     try:
         session.start()
         if not session.wait_until_ready():
-            result["failure_reason"] = "packaged API failed to start"
+            result["failure_reason"] = f"packaged API failed to start ({health_url})"
             return result
 
         result["ready"] = True
-        templates_resp = requests.get(TEMPLATES_URL, timeout=10)
+        templates_resp = requests.get(templates_url, timeout=10)
         result["templates_status"] = templates_resp.status_code
 
         payload = {
             "unit_name": "Smoke_unit_name",
             "target_name": "SmokeTarget",
         }
-        generate_resp = requests.post(GENERATE_URL, json=payload, timeout=20)
+        generate_resp = requests.post(generate_url, json=payload, timeout=20)
         result["generate_status"] = generate_resp.status_code
 
         generate_payload: Dict[str, Any]

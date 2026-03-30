@@ -1,6 +1,6 @@
 {
   "name": "report-electron-app",
-  "version": "0.18.2",
+  "version": "0.18.3",
   "description": "Electron version of ReportGenX",
   "repository": {
     "type": "git",
@@ -15,7 +15,7 @@
     "test:backend": "python -m unittest discover -s backend/tests -p \"test_*.py\"",
     "test": "npm run test:backend",
     "prestart": "npm run sync-version",
-    "predist": "npm run sync-version",
+    "predist": "npm run sync-version && npm run check-version",
     "dist": "electron-builder",
     "postinstall": "electron-builder install-app-deps"
   },
@@ -45,16 +45,16 @@
         "to": "backend/config.yaml"
       },
       {
+        "from": "backend/shared-config.json",
+        "to": "backend/shared-config.json"
+      },
+      {
         "from": "backend/templates",
         "to": "backend/templates"
       },
       {
         "from": "backend/data",
         "to": "backend/data"
-      },
-      {
-        "from": "backend/output",
-        "to": "backend/output"
       }
     ],
     "win": {
