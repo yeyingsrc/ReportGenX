@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import json
+import socket
 import subprocess
 import threading
 import time
@@ -78,6 +79,16 @@ class ApiProcess:
         self.proc: subprocess.Popen[str] | None = None
         self._reader_thread: threading.Thread | None = None
         self.log_lines: List[str] = []
+
+    def poll(self) -> int | None:
+        if self.proc is None:
+            return None
+        return self.proc.poll()
+
+    def log_tail(self, limit: int = 30) -> str:
+        if not self.log_lines:
+            return ""
+        return "\n".join(self.log_lines[-limit:])
 
     def start(self) -> None:
         self.proc = subprocess.Popen(
@@ -152,6 +163,33 @@ def _write_runtime_config(base_config: Dict[str, Any], scenario: DrillScenario) 
         fh.write("\n")
 
 
+def _allocate_local_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _prepare_scenario_config(base_config: Dict[str, Any], scenario: DrillScenario) -> Dict[str, Any]:
+    config = copy.deepcopy(base_config)
+
+    plugin_runtime = config.get("plugin_runtime", {})
+    if not isinstance(plugin_runtime, dict):
+        plugin_runtime = {}
+    plugin_runtime["mode"] = scenario.mode
+    plugin_runtime["use_legacy_core_alias"] = scenario.use_legacy_core_alias
+    plugin_runtime["force_legacy_templates"] = list(scenario.force_legacy_templates)
+    config["plugin_runtime"] = plugin_runtime
+
+    server = config.get("server", {})
+    if not isinstance(server, dict):
+        server = {}
+    server["host"] = "127.0.0.1"
+    server["port"] = _allocate_local_port()
+    config["server"] = server
+
+    return config
+
+
 def _build_base_url(base_config: Dict[str, Any]) -> str:
     server = base_config.get("server", {})
     host = str(server.get("host", "127.0.0.1") or "127.0.0.1")
@@ -178,8 +216,9 @@ def _run_scenario(
     scenario: DrillScenario,
     packaged_api_binary: Path,
 ) -> Dict[str, Any]:
-    _write_runtime_config(base_config, scenario)
-    base_url = _build_base_url(base_config)
+    scenario_config = _prepare_scenario_config(base_config, scenario)
+    _write_runtime_config(scenario_config, scenario)
+    base_url = _build_base_url(scenario_config)
     health_url = f"{base_url}{HEALTH_PATH}"
     templates_url = f"{base_url}{TEMPLATES_PATH}"
     generate_url = f"{base_url}{GENERATE_PATH}"
@@ -200,7 +239,15 @@ def _run_scenario(
     try:
         session.start()
         if not session.wait_until_ready():
+            exit_code = session.poll()
+            log_tail = session.log_tail()
             result["failure_reason"] = f"packaged API failed to start ({health_url})"
+            if exit_code is not None:
+                result["failure_reason"] += f" exit={exit_code}"
+            if log_tail:
+                compact_tail = " | ".join(line.strip() for line in log_tail.splitlines() if line.strip())
+                if compact_tail:
+                    result["failure_reason"] += f" logs={compact_tail[:1200]}"
             return result
 
         result["ready"] = True
