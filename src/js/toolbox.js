@@ -242,9 +242,7 @@ window.AppToolbox = {
             delBtn.innerHTML = "🗑️";
             delBtn.onclick = async (e) => {
                 e.stopPropagation();
-                if(await AppUtils.safeConfirm(`删除 ${item.name}?`)) {
-                    await this.deleteReport(item.path);
-                }
+                await this.deleteReport(item.path);
             };
             actionSpan.appendChild(delBtn);
 
@@ -292,9 +290,12 @@ window.AppToolbox = {
     async deleteReport(path) {
         try {
             // 使用CRUD管理器的delete方法
-            await this.crud.delete(path, {
+            const result = await this.crud.delete(path, {
                 confirmMessage: `确定要删除此报告吗？`
             });
+            if (!result) {
+                return;
+            }
             const idx = this.SELECTED_REPORTS.indexOf(path);
             if(idx > -1) this.SELECTED_REPORTS.splice(idx, 1);
             this.loadReportFiles();
@@ -304,17 +305,18 @@ window.AppToolbox = {
     },
 
     async batchDelete() {
-        if(await AppUtils.safeConfirm(`确认删除选中的 ${this.SELECTED_REPORTS.length} 个文件?`)) {
-            try {
-                // 使用CRUD管理器的batchDelete方法
-                await this.crud.batchDelete(this.SELECTED_REPORTS, {
-                    confirmMessage: `确认删除选中的 ${this.SELECTED_REPORTS.length} 个文件?`
-                });
-                this.SELECTED_REPORTS = [];
-                this.loadReportFiles();
-            } catch(e) {
-                console.error(e);
+        try {
+            // 使用CRUD管理器的batchDelete方法
+            const result = await this.crud.batchDelete(this.SELECTED_REPORTS, {
+                confirmMessage: `确认删除选中的 ${this.SELECTED_REPORTS.length} 个文件?`
+            });
+            if (!result) {
+                return;
             }
+            this.SELECTED_REPORTS = [];
+            this.loadReportFiles();
+        } catch(e) {
+            console.error(e);
         }
     },
 
@@ -349,11 +351,11 @@ window.AppToolbox = {
     async downloadBackup() {
         try {
             AppUtils.showToast("正在下载备份...", "info");
-            // 使用新API直接打开下载链接
-            window.AppAPI.backupDatabase();
+            const result = await window.AppAPI.backupDatabase();
+            AppUtils.showToast(`备份下载已开始${result && result.filename ? `: ${result.filename}` : ''}`, "success");
         } catch(e) {
             console.error(e);
-            AppUtils.showToast("操作失败", "error");
+            AppUtils.showToast(`备份下载失败: ${e.message}`, "error");
         }
     },
 
@@ -384,7 +386,7 @@ window.AppToolbox = {
             if (el) el.value = value;
         };
 
-        setValue('runtime-mode', runtime.mode || 'descriptor');
+        setValue('runtime-mode', runtime.mode || 'hybrid');
         setValue('runtime-isolated-fallback', runtime.isolated_fallback_mode || 'hybrid');
         setValue('runtime-subprocess-strategy', runtime.subprocess_strategy || 'hybrid');
         setValue('runtime-subprocess-timeout', runtime.subprocess_timeout_seconds ?? 120);

@@ -123,7 +123,38 @@ class CRUDManager {
     
     if (await AppUtils.safeConfirm(confirmMsg)) {
       try {
-        const result = await this.api.batchDelete(ids);
+        let result;
+
+        if (typeof this.api.batchDelete === 'function') {
+          result = await this.api.batchDelete(ids);
+        } else if (typeof this.api.delete === 'function') {
+          const failures = [];
+
+          for (const id of ids) {
+            try {
+              await this.api.delete(id);
+            } catch (error) {
+              failures.push({
+                id,
+                message: error && error.message ? error.message : String(error)
+              });
+            }
+          }
+
+          if (failures.length > 0) {
+            await this.load();
+            const failureSummary = failures.map((item) => `${item.id}: ${item.message}`).join('; ');
+            throw new Error(failureSummary);
+          }
+
+          result = {
+            success: true,
+            message: `已删除 ${ids.length} 项`
+          };
+        } else {
+          throw new Error('当前数据源不支持批量删除');
+        }
+
         AppUtils.showToast(result.message || '批量删除成功', 'success');
         await this.load();
         return result;
