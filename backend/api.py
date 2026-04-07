@@ -133,9 +133,9 @@ def _normalize_shared_config(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(port, int) or port < 1 or port > 65535:
         port = 8000
 
-    runtime_mode = str(plugin_runtime.get("mode", "descriptor")).lower()
+    runtime_mode = str(plugin_runtime.get("mode", "hybrid")).lower()
     if runtime_mode not in {"legacy", "hybrid", "descriptor", "isolated"}:
-        runtime_mode = "descriptor"
+        runtime_mode = "hybrid"
 
     use_legacy_core_alias = plugin_runtime.get("use_legacy_core_alias", False)
     if not isinstance(use_legacy_core_alias, bool):

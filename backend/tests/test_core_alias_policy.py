@@ -10,7 +10,7 @@ class CoreAliasPolicyTests(unittest.TestCase):
     def test_normalize_shared_config_disables_legacy_alias_by_default(self):
         normalized = api_module._normalize_shared_config({})
         plugin_runtime = normalized.get("plugin_runtime", {})
-        self.assertEqual(plugin_runtime.get("mode"), "descriptor")
+        self.assertEqual(plugin_runtime.get("mode"), "hybrid")
         self.assertFalse(plugin_runtime.get("use_legacy_core_alias"))
         self.assertEqual(plugin_runtime.get("force_legacy_templates"), [])
 

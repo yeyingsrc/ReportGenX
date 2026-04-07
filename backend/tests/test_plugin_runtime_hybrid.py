@@ -105,15 +105,15 @@ class PluginRuntimeHybridTests(unittest.TestCase):
         self.assertEqual(result["message"], "descriptor path")
         self.assertIn("descriptor.docx", result["report_path"])
 
-    def test_default_mode_is_descriptor_when_config_missing(self):
-        template_id = "default_descriptor_mode"
+    def test_default_mode_is_hybrid_when_config_missing(self):
+        template_id = "default_hybrid_mode"
         HandlerRegistry.register(template_id, _LegacyHandler)
 
         def descriptor_execute(**kwargs: Any) -> Dict[str, Any]:
             return {
                 "success": True,
-                "report_path": f"{kwargs['output_dir']}/default_descriptor.docx",
-                "message": "descriptor default",
+                "report_path": f"{kwargs['output_dir']}/default_hybrid.docx",
+                "message": "hybrid default",
                 "errors": [],
             }
 
@@ -128,8 +128,8 @@ class PluginRuntimeHybridTests(unittest.TestCase):
         )
 
         self.assertTrue(result["success"])
-        self.assertEqual(result["message"], "descriptor default")
-        self.assertIn("default_descriptor.docx", result["report_path"])
+        self.assertEqual(result["message"], "hybrid default")
+        self.assertIn("default_hybrid.docx", result["report_path"])
 
     def test_hybrid_falls_back_to_legacy_when_descriptor_missing(self):
         template_id = "hybrid_legacy_fallback"

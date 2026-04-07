@@ -28,7 +28,7 @@ const DEFAULT_SHARED_CONFIG = {
     open_folder_allowlist: ['output/report', 'output/temp', 'output'],
   },
   plugin_runtime: {
-    mode: 'descriptor',
+    mode: 'hybrid',
     use_legacy_core_alias: false,
     force_legacy_templates: [],
     subprocess_strategy: 'hybrid',

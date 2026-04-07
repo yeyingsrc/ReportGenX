@@ -282,7 +282,7 @@
                             <section class="settings-overview-card">
                                 <div class="settings-overview-copy">
                                     <span class="settings-eyebrow">系统设置</span>
-                                    <h3 class="settings-page-title">备份与运行时控制台</h3>
+                                    <h3 class="settings-page-title">备份与模板运行设置</h3>
                                     <p class="settings-page-desc">集中管理数据安全与模板运行策略，保留现有控件与交互逻辑，同时优化信息分层、阅读节奏和窄屏布局。</p>
                                 </div>
                                 <div class="settings-overview-note">
@@ -322,43 +322,52 @@
                                     <div class="settings-card-icon" aria-hidden="true">⚙️</div>
                                     <div>
                                         <h3 class="settings-card-title">运行时高级设置</h3>
-                                        <p class="settings-card-desc">用于控制模板执行隔离模式、灰度比例与回退策略。修改后会直接影响运行表现，请谨慎调整。</p>
+                                        <p class="settings-card-desc">通常保持默认即可。默认配置已经兼顾稳定性与兼容性；只有在排查模板兼容问题、灰度试运行新模式时，才需要手动调整。</p>
                                     </div>
                                 </div>
 
                                 <div id="runtime-settings-panel" class="settings-runtime-panel">
+                                    <div class="settings-tip-row">
+                                        <span class="settings-tip-badge">推荐</span>
+                                        <span>大多数用户直接保持：运行模式 = 自动兼容模式、隔离回退模式 = 自动兼容兜底、隔离子进程策略 = 自动兼容策略。</span>
+                                    </div>
+
                                     <div class="settings-field-grid">
                                         <div class="settings-field">
-                                            <label for="runtime-mode">运行模式</label>
+                                            <label for="runtime-mode">运行模式（建议保持“自动兼容模式”）</label>
                                             <select id="runtime-mode">
-                                                <option value="descriptor">descriptor</option>
-                                                <option value="hybrid">hybrid</option>
-                                                <option value="legacy">legacy</option>
-                                                <option value="isolated">isolated</option>
+                                                <option value="descriptor">新模式优先（严格）</option>
+                                                <option value="hybrid">自动兼容模式（推荐）</option>
+                                                <option value="legacy">旧模式优先</option>
+                                                <option value="isolated">独立进程试运行</option>
                                             </select>
+                                            <small class="settings-field-help">如果你不清楚该怎么选，就保持“自动兼容模式”。它会优先使用新执行方式，同时尽量避免因为兼容性问题直接报错失败。</small>
                                         </div>
                                         <div class="settings-field">
-                                            <label for="runtime-isolated-fallback">隔离回退模式</label>
+                                            <label for="runtime-isolated-fallback">隔离回退模式（建议保持“自动兼容兜底”）</label>
                                             <select id="runtime-isolated-fallback">
-                                                <option value="hybrid">hybrid</option>
-                                                <option value="descriptor">descriptor</option>
-                                                <option value="legacy">legacy</option>
+                                                <option value="hybrid">自动兼容兜底（推荐）</option>
+                                                <option value="descriptor">仍坚持新模式</option>
+                                                <option value="legacy">直接改走旧模式</option>
                                             </select>
+                                            <small class="settings-field-help">只有在你启用了“独立进程试运行”时，这个配置才会明显生效。一般保留“自动兼容兜底”更稳妥。</small>
                                         </div>
                                         <div class="settings-field">
-                                            <label for="runtime-subprocess-strategy">隔离子进程策略</label>
+                                            <label for="runtime-subprocess-strategy">隔离子进程策略（建议保持“自动兼容策略”）</label>
                                             <select id="runtime-subprocess-strategy">
-                                                <option value="hybrid">hybrid</option>
-                                                <option value="descriptor">descriptor</option>
-                                                <option value="legacy">legacy</option>
+                                                <option value="hybrid">自动兼容策略（推荐）</option>
+                                                <option value="descriptor">子进程只走新模式</option>
+                                                <option value="legacy">子进程只走旧模式</option>
                                             </select>
+                                            <small class="settings-field-help">这个选项主要给隔离执行时用。除非你正在排查某个模板在隔离子进程中的特殊问题，否则不要改。</small>
                                         </div>
                                         <div class="settings-field">
                                             <label for="runtime-subprocess-timeout">子进程超时（秒）</label>
                                             <input type="number" id="runtime-subprocess-timeout" min="1" max="600" step="1">
+                                            <small class="settings-field-help">默认 120 秒。只有模板生成特别慢时才需要调大；太小可能导致正常任务被误判为超时。</small>
                                         </div>
                                         <div class="settings-field">
-                                            <label for="runtime-isolated-rollout">隔离灰度比例（0-100）</label>
+                                            <label for="runtime-isolated-rollout">隔离试运行比例（0-100，默认 0）</label>
                                             <input type="number" id="runtime-isolated-rollout" min="0" max="100" step="1">
                                             <div class="settings-inline-tools" aria-label="灰度快捷设置">
                                                 <button type="button" class="runtime-rollout-preset" data-rollout="0">0%</button>
@@ -367,37 +376,43 @@
                                                 <button type="button" class="runtime-rollout-preset" data-rollout="50">50%</button>
                                                 <button type="button" class="runtime-rollout-preset" data-rollout="100">100%</button>
                                             </div>
+                                            <small class="settings-field-help">0 表示默认不启用隔离试运行。建议按 5% → 25% → 50% → 100% 逐步放量，不要一开始就全量。</small>
                                         </div>
                                         <div class="settings-field">
                                             <label for="runtime-metrics-every">指标采样频率 N</label>
                                             <input type="number" id="runtime-metrics-every" min="1" max="10000" step="1">
+                                            <small class="settings-field-help">默认 50，表示每执行约 50 次记录一次指标。一般不需要改，数值越小日志/统计越频繁。</small>
                                         </div>
                                     </div>
 
                                     <div class="settings-field-stack">
                                         <div class="settings-field settings-field-wide">
-                                            <label for="runtime-force-legacy">强制 legacy 模板（逗号分隔）</label>
+                                            <label for="runtime-force-legacy">强制使用旧模式的模板（可空，逗号分隔）</label>
                                             <input type="text" id="runtime-force-legacy" placeholder="vuln_report, intrusion_report">
+                                            <small class="settings-field-help">只有某个模板在新模式下不稳定时再填。留空表示所有模板都按默认策略运行。</small>
                                         </div>
                                         <div class="settings-field settings-field-wide">
-                                            <label for="runtime-enabled-templates">隔离启用模板白名单（逗号分隔，可空）</label>
+                                            <label for="runtime-enabled-templates">隔离模式启用模板名单（可空，逗号分隔）</label>
                                             <input type="text" id="runtime-enabled-templates" placeholder="Attack_Defense, penetration_test">
+                                            <small class="settings-field-help">只让指定模板参与 isolated 试运行。适合先挑少量模板做验证，普通使用建议留空。</small>
                                         </div>
                                         <div class="settings-field settings-field-wide">
-                                            <label for="runtime-disabled-templates">隔离禁用模板黑名单（逗号分隔，可空）</label>
+                                            <label for="runtime-disabled-templates">隔离模式禁用模板名单（可空，逗号分隔）</label>
                                             <input type="text" id="runtime-disabled-templates" placeholder="vuln_report">
+                                            <small class="settings-field-help">当某些模板确认不适合 isolated 时再填写。留空表示不额外禁用。</small>
                                         </div>
                                         <div class="settings-field settings-field-wide">
-                                            <label for="runtime-template-rollout">模板级灰度覆盖（JSON，如 {"Attack_Defense":100}）</label>
+                                            <label for="runtime-template-rollout">按模板单独设置试运行比例（高级用法，JSON）</label>
                                             <textarea id="runtime-template-rollout" rows="4"></textarea>
                                             <div class="settings-inline-tools">
                                                 <button type="button" id="runtime-template-rollout-example" class="runtime-inline-action">填充示例</button>
                                             </div>
+                                            <small class="settings-field-help">用于给单个模板单独指定试运行比例，例如 {&quot;Attack_Defense&quot;: 100}。不确定怎么写就留空。</small>
                                         </div>
                                     </div>
 
                                     <div class="settings-warning-note" role="note">
-                                        <strong>变更提示：</strong> 建议先设置 5% 灰度观察，再逐步提升到 25% / 50% / 100%。
+                                        <strong>变更提示：</strong> 如果你只是正常使用软件，建议保持默认值不动；只有在模板兼容排查或灰度试运行时，再按 5% → 25% → 50% → 100% 逐步调整。
                                     </div>
 
                                     <div class="settings-actions">
