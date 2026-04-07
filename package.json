@@ -1,6 +1,6 @@
 {
   "name": "report-electron-app",
-  "version": "0.18.3",
+  "version": "0.18.4",
   "description": "Electron version of ReportGenX",
   "repository": {
     "type": "git",
