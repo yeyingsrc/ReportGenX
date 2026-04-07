@@ -117,12 +117,13 @@ window.AppTemplateManager = {
                 span.style.textAlign = 'center';
                 span.style.justifyContent = 'center';
                 break;
-            case 'file_size_mb':
+            case 'file_size_mb': {
                 const size = template.file_size_mb || 0;
                 span.innerText = typeof size === 'number' ? size.toFixed(2) : '-';
                 span.style.textAlign = 'center';
                 span.style.justifyContent = 'center';
                 break;
+            }
             case 'update_time':
                 span.innerText = template.update_time || '-';
                 span.style.color = '#909399';
@@ -348,14 +349,18 @@ window.AppTemplateManager = {
     async exportTemplate(templateId) {
         try {
             if (window.AppUtils) AppUtils.showToast('正在导出模板...', 'info');
-            
-            const url = window.AppAPI.Templates.exportUrl(templateId);
+
+            const download = await window.AppAPI.Templates.export(templateId);
+            const filename = download.filename || (templateId + '_template.zip');
+            const blob = download.blob;
+            const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = templateId + '.zip';
+            a.download = filename;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
             
             if (window.AppUtils) AppUtils.showToast('模板导出成功', 'success');
         } catch (e) {
@@ -627,30 +632,10 @@ window.AppTemplateManager = {
             if (window.AppUtils) {
                 AppUtils.showToast(`正在导出 ${this.selectedTemplateIds.length} 个模板...`, 'info');
             }
-            
-            // 调用批量导出 API
-            const response = await fetch(window.AppAPI.BASE_URL + '/api/templates/batch-export', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(this.selectedTemplateIds)
-            });
-            
-            if (!response.ok) {
-                throw new Error('批量导出失败');
-            }
-            
-            // 获取文件名
-            const contentDisposition = response.headers.get('Content-Disposition');
-            let filename = 'templates_batch.zip';
-            if (contentDisposition) {
-                const matches = /filename=(.+)/.exec(contentDisposition);
-                if (matches && matches[1]) {
-                    filename = matches[1];
-                }
-            }
-            
-            // 下载文件
-            const blob = await response.blob();
+
+            const download = await window.AppAPI.Templates.batchExport(this.selectedTemplateIds);
+            const filename = download.filename || 'templates_batch.zip';
+            const blob = download.blob;
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;

@@ -2872,20 +2872,10 @@ window.AppFormRenderer = {
             }
             
             if (window.AppUtils) AppUtils.showToast('正在导出模板...', 'info');
-            
-            const res = await fetch(window.AppAPI.BASE_URL + '/api/templates/' + tid + '/export');
-            if (!res.ok) throw new Error('导出失败: ' + res.statusText);
-            
-            // 获取文件名
-            const contentDisposition = res.headers.get('Content-Disposition');
-            let filename = tid + '_template.zip';
-            if (contentDisposition) {
-                const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-                if (match) filename = match[1].replace(/['"]/g, '');
-            }
-            
-            // 下载文件
-            const blob = await res.blob();
+
+            const download = await window.AppAPI.Templates.export(tid);
+            const filename = download.filename || (tid + '_template.zip');
+            const blob = download.blob;
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;

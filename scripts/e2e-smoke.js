@@ -72,6 +72,105 @@ async function runSmoke() {
       console.log('[e2e-smoke] merge returned non-token error (acceptable for smoke):', mergeResult.message)
     }
 
+    const exportResult = await page.evaluate(async () => {
+      try {
+        const single = await window.AppAPI.Templates.export('vuln_report')
+        const batch = await window.AppAPI.Templates.batchExport(['vuln_report', 'intrusion_report'])
+        return {
+          ok: true,
+          singleSize: single && single.blob ? single.blob.size : 0,
+          batchSize: batch && batch.blob ? batch.blob.size : 0,
+          singleFilename: single && single.filename ? single.filename : '',
+          batchFilename: batch && batch.filename ? batch.filename : ''
+        }
+      } catch (err) {
+        return { ok: false, message: err && err.message ? err.message : String(err) }
+      }
+    })
+
+    if (!exportResult.ok) {
+      throw new Error(`Smoke failed: template export error: ${exportResult.message}`)
+    }
+
+    if (exportResult.singleSize <= 0 || exportResult.batchSize <= 0) {
+      throw new Error(`Smoke failed: template export returned empty archive(s): ${JSON.stringify(exportResult)}`)
+    }
+
+    if (!/\.zip$/i.test(exportResult.singleFilename || '') || !/\.zip$/i.test(exportResult.batchFilename || '')) {
+      throw new Error(`Smoke failed: template export filename missing zip extension: ${JSON.stringify(exportResult)}`)
+    }
+
+    const backupResult = await page.evaluate(async () => {
+      let originalCreateObjectURL
+      let originalRevokeObjectURL
+      let originalAppendChild
+      let originalRemoveChild
+
+      try {
+        let clickedDownload = ''
+        let blobUrlCreated = false
+
+        originalCreateObjectURL = window.URL.createObjectURL
+        originalRevokeObjectURL = window.URL.revokeObjectURL
+        originalAppendChild = document.body.appendChild.bind(document.body)
+        originalRemoveChild = document.body.removeChild.bind(document.body)
+
+        window.URL.createObjectURL = (blob) => {
+          blobUrlCreated = !!(blob && blob.size > 0)
+          return originalCreateObjectURL.call(window.URL, blob)
+        }
+
+        document.body.appendChild = (node) => {
+          if (node && typeof node.click === 'function') {
+            const originalClick = node.click.bind(node)
+            node.click = () => {
+              clickedDownload = node.download || ''
+              return originalClick()
+            }
+          }
+          return originalAppendChild(node)
+        }
+
+        document.body.removeChild = (node) => originalRemoveChild(node)
+
+        const result = await window.AppAPI.backupDatabase()
+
+        return {
+          ok: true,
+          filename: result && result.filename ? result.filename : '',
+          clickedDownload,
+          blobUrlCreated
+        }
+      } catch (err) {
+        return { ok: false, message: err && err.message ? err.message : String(err) }
+      } finally {
+        if (originalCreateObjectURL) {
+          window.URL.createObjectURL = originalCreateObjectURL
+        }
+        if (originalRevokeObjectURL) {
+          window.URL.revokeObjectURL = originalRevokeObjectURL
+        }
+        if (originalAppendChild) {
+          document.body.appendChild = originalAppendChild
+        }
+        if (originalRemoveChild) {
+          document.body.removeChild = originalRemoveChild
+        }
+      }
+    })
+
+    if (!backupResult.ok) {
+      throw new Error(`Smoke failed: backup download error: ${JSON.stringify(backupResult)}`)
+    }
+
+    if (!backupResult.blobUrlCreated) {
+      throw new Error(`Smoke failed: backup download did not create blob URL: ${JSON.stringify(backupResult)}`)
+    }
+
+    if (!/\.db$/i.test(backupResult.filename || '') || !/\.db$/i.test(backupResult.clickedDownload || '')) {
+      throw new Error(`Smoke failed: backup download filename missing db extension: ${JSON.stringify(backupResult)}`)
+    }
+
     console.log('[e2e-smoke] PASS')
   } finally {
     await electronApp.close()

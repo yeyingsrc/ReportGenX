@@ -78,6 +78,69 @@ window.AppAPI = {
         }
     },
 
+    async _requestBlob(endpoint, method = 'GET', body = null) {
+        const options = {
+            method,
+            headers: this._buildAuthHeaders()
+        };
+
+        if (body) {
+            if (body instanceof FormData) {
+                options.body = body;
+            } else {
+                options.headers['Content-Type'] = 'application/json';
+                options.body = JSON.stringify(body);
+            }
+        }
+
+        try {
+            const res = await fetch(`${this.BASE_URL}${endpoint}`, options);
+            if (!res.ok) {
+                const errorData = await res.json().catch(() => ({}));
+                const message = this._extractErrorMessage(errorData, res.status);
+                if (res.status === 403 && /invalid application token/i.test(message)) {
+                    const tokenBound = await this._verifyTokenBinding();
+                    if (!tokenBound) {
+                        throw new Error('检测到后端令牌不一致，请完全退出并重启应用（关闭旧后端进程后再启动）。');
+                    }
+                }
+                throw new Error(message);
+            }
+
+            return {
+                blob: await res.blob(),
+                filename: this._extractDownloadFilename(res.headers.get('Content-Disposition'))
+            };
+        } catch (e) {
+            if (e instanceof TypeError) {
+                throw new Error(`无法连接后端服务（${this.BASE_URL}）`);
+            }
+            throw e;
+        }
+    },
+
+    _extractDownloadFilename(contentDisposition) {
+        if (!contentDisposition) {
+            return '';
+        }
+
+        const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;\n]+)/i);
+        if (utf8Match && utf8Match[1]) {
+            try {
+                return decodeURIComponent(utf8Match[1].trim());
+            } catch (_e) {
+                return utf8Match[1].trim();
+            }
+        }
+
+        const basicMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/i);
+        if (basicMatch && basicMatch[1]) {
+            return basicMatch[1].replace(/['"]/g, '').trim();
+        }
+
+        return '';
+    },
+
     // --- Core ---
 
     // 初始化检查
@@ -99,6 +162,10 @@ window.AppAPI = {
 
     async getPluginRuntimeConfig() {
         return this._request('/api/plugin-runtime-config');
+    },
+
+    async getFrontendConfig() {
+        return this._request('/api/frontend-config');
     },
 
     async updatePluginRuntimeConfig(data) {
@@ -123,8 +190,22 @@ window.AppAPI = {
     },
 
     async backupDatabase() {
-        // Blob downloading is special, so we might need custom logic or just window.open
-        window.open(this._appendTokenToUrl(`${this.BASE_URL}/api/backup-db`));
+        const download = await this._requestBlob('/api/backup-db');
+        const filename = download.filename || 'backup.db';
+        const blob = download.blob;
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+
+        return {
+            success: true,
+            filename
+        };
     },
 
     // --- Vulnerabilities ---
@@ -207,7 +288,15 @@ window.AppAPI = {
         exportUrl(id) {
             return window.AppAPI._appendTokenToUrl(`${window.AppAPI.BASE_URL}/api/templates/${id}/export`);
         },
-        
+
+        async export(id) {
+            return window.AppAPI._requestBlob(`/api/templates/${id}/export`);
+        },
+
+        async batchExport(templateIds) {
+            return window.AppAPI._requestBlob('/api/templates/batch-export', 'POST', templateIds);
+        },
+         
         async save(data) {
             // Templates don't have a traditional save operation
             // This is a placeholder for CRUDManager compatibility

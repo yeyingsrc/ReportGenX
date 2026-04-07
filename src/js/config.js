@@ -96,18 +96,14 @@ window.AppConfig = {
  */
 window.AppConfig.syncFromBackend = async function() {
   try {
-    const response = await fetch(`${this.API.BASE_URL}/api/frontend-config`);
-    if (response.ok) {
-      const backendConfig = await response.json();
-      // 同步风险等级颜色
-      if (backendConfig.risk_levels) {
-        this.THEME.RISK_COLORS = {};
-        backendConfig.risk_levels.forEach(level => {
-          this.THEME.RISK_COLORS[level.value] = level.color;
-        });
-      }
-      console.log('[AppConfig] 已从后端同步配置');
+    const backendConfig = await window.AppAPI.getFrontendConfig();
+    if (backendConfig.risk_levels) {
+      this.THEME.RISK_COLORS = {};
+      backendConfig.risk_levels.forEach(level => {
+        this.THEME.RISK_COLORS[level.value] = level.color;
+      });
     }
+    console.log('[AppConfig] 已从后端同步配置');
   } catch (error) {
     console.warn('[AppConfig] 无法从后端同步配置，使用默认值:', error.message);
   }
