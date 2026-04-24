@@ -16,7 +16,8 @@ nul
 *.tmp
 *.old
 *~
-
+backend/templates/Attack_Defense/
+backend/templates/penetration_test/
 # 忽略系统文件
 .DS_Store
 Thumbs.db
