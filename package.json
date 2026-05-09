@@ -67,7 +67,7 @@
           ]
         }
       ],
-      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+      "artifactName": "${productName}-win-Setup-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -91,12 +91,12 @@
           ]
         }
       ],
-      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "artifactName": "${productName}-mac-${version}-${arch}.${ext}",
       "category": "public.app-category.productivity"
     },
     "dmg": {
       "sign": false,
-      "artifactName": "${productName}-${version}-${arch}-unsigned.${ext}"
+      "artifactName": "${productName}-mac-${version}-${arch}-unsigned.${ext}"
     }
 
   },

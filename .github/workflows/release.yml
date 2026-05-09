@@ -223,10 +223,13 @@ jobs:
           
           ### Windows (不再支持Win7)
           #### 正常版本(推荐)
-          - [64位(常用)]($DOWNLOAD_URL/ReportGenX-Setup-$VERSION-x64.exe) | [ARM64(不常用)]($DOWNLOAD_URL/ReportGenX-Setup-$VERSION-arm64.exe)
+          - [64位(常用)]($DOWNLOAD_URL/ReportGenX-win-Setup-$VERSION-x64.exe) | [ARM64(不常用)]($DOWNLOAD_URL/ReportGenX-win-Setup-$VERSION-arm64.exe)
           
           ### macOS
-          - [Apple M芯片]($DOWNLOAD_URL/ReportGenX-$VERSION-arm64-unsigned.dmg) | [Intel芯片]($DOWNLOAD_URL/ReportGenX-$VERSION-x64-unsigned.dmg)
+          #### DMG磁盘映像(推荐) 双击挂载后拖入Applications
+          - [Apple M芯片]($DOWNLOAD_URL/ReportGenX-mac-$VERSION-arm64-unsigned.dmg) | [Intel芯片]($DOWNLOAD_URL/ReportGenX-mac-$VERSION-x64-unsigned.dmg)
+          #### ZIP压缩包(备用) 解压即用，适用于无法挂载DMG的环境
+          - [Apple M芯片]($DOWNLOAD_URL/ReportGenX-mac-$VERSION-arm64.zip) | [Intel芯片]($DOWNLOAD_URL/ReportGenX-mac-$VERSION-x64.zip)
 
           ### 校验和
           - [latest.yml]($DOWNLOAD_URL/latest.yml)
