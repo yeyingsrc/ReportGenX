@@ -46,10 +46,6 @@ jobs:
             platform: mac
             arch: arm64
             args: "--mac --arm64"
-          - os: ubuntu-latest
-            platform: linux
-            arch: x64
-            args: "--linux --x64"
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -99,12 +95,6 @@ jobs:
 
       - name: Check version sync
         run: npm run check-version
-
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libfuse2 rpm
 
       - name: Build Electron App (Windows with optional signing)
         if: runner.os == 'Windows'
@@ -197,9 +187,6 @@ jobs:
             dist/*-${{ matrix.arch }}*.exe
             dist/*-${{ matrix.arch }}*.dmg
             dist/*-${{ matrix.arch }}*.zip
-            dist/*-x86_64*.AppImage
-            dist/*-amd64*.deb
-            dist/*-x86_64*.rpm
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -216,14 +203,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/latest-mac.yml
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload latest yml (Linux only)
-        if: startsWith(github.ref, 'refs/tags/') && matrix.platform == 'linux'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/latest-linux.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -247,21 +226,10 @@ jobs:
           
           ### macOS
           - [Apple M芯片]($DOWNLOAD_URL/ReportGenX-$VERSION-arm64.dmg) | [Intel芯片]($DOWNLOAD_URL/ReportGenX-$VERSION-x64.dmg)
-          
-          ### Linux
-          #### DEB包(Debian系) 使用 apt ./路径 安装
-          - [64位]($DOWNLOAD_URL/ReportGenX-$VERSION-amd64.deb)
-          
-          #### RPM包(Redhat系) 使用 dnf ./路径 安装
-          - [64位]($DOWNLOAD_URL/ReportGenX-$VERSION-x86_64.rpm)
-          
-          #### AppImage (通用)
-          - [64位]($DOWNLOAD_URL/ReportGenX-$VERSION-x86_64.AppImage)
-          
+
           ### 校验和
           - [latest.yml]($DOWNLOAD_URL/latest.yml)
           - [latest-mac.yml]($DOWNLOAD_URL/latest-mac.yml)
-          - [latest-linux.yml]($DOWNLOAD_URL/latest-linux.yml)
           EOF
 
       - name: Update Release Body
