@@ -245,5 +245,5 @@ class MyTemplateHandler(BaseTemplateHandler):
 
 GitHub Actions workflow (`.github/workflows/release.yml`):
 - Triggers on `v*.*.*` tags
-- Builds for Windows (x64/arm64), macOS (x64/arm64), Linux (x64)
+- Builds for Windows (x64/arm64), macOS (x64/arm64)
 - Publishes to GitHub Releases

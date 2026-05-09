@@ -128,7 +128,7 @@ npm run test:e2e:smoke
 CI 冒烟：
 
 - 工作流：`.github/workflows/ci-smoke.yml`
-- 内容：后端单元测试 + Electron 冒烟（`xvfb-run`）
+- 内容：后端单元测试 + Electron 冒烟
 
 ---
 

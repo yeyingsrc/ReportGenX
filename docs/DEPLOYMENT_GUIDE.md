@@ -121,11 +121,11 @@ npm run test:e2e:smoke
 
 ## 6.2 CI 冒烟
 
-仓库提供 `.github/workflows/ci-smoke.yml`，在 Ubuntu 上执行：
+仓库提供 `.github/workflows/ci-smoke.yml`：
 
 1. 安装 Python/Node 依赖
 2. 运行后端单元测试
-3. 通过 `xvfb-run` 执行 Electron 冒烟
+3. 执行 Electron 冒烟
 
 ---
 

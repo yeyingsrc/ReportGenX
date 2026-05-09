@@ -3,8 +3,7 @@ const path = require('path');
 
 const os = process.env.RUNNER_OS || {
   win32: 'Windows',
-  darwin: 'macOS',
-  linux: 'Linux'
+  darwin: 'macOS'
 }[process.platform];
 
 function listMacSharedConfigCandidates() {
@@ -39,16 +38,12 @@ const candidatesByOs = {
     path.join('dist', 'win-unpacked', 'resources', 'backend', 'shared-config.json'),
     path.join('dist', 'win-arm64-unpacked', 'resources', 'backend', 'shared-config.json')
   ],
-  macOS: listMacSharedConfigCandidates(),
-  Linux: [
-    path.join('dist', 'linux-unpacked', 'resources', 'backend', 'shared-config.json')
-  ]
+  macOS: listMacSharedConfigCandidates()
 };
 
 const requiredByOs = {
   Windows: 'all',
-  macOS: 'any',
-  Linux: 'any'
+  macOS: 'any'
 };
 
 const candidates = candidatesByOs[os] || [];

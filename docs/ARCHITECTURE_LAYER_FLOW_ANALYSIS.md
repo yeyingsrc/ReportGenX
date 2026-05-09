@@ -201,7 +201,7 @@ sequenceDiagram
 
 - 后端单元测试：`npm run test`
 - Electron 冒烟：`npm run test:e2e:smoke`
-- CI：`.github/workflows/ci-smoke.yml` 在 Ubuntu 上执行后端测试 + Electron 冒烟
+- CI：`.github/workflows/ci-smoke.yml` 执行后端测试 + Electron 冒烟
 
 ---
 
