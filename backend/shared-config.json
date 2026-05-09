@@ -4,7 +4,7 @@
     "port": 8000
   },
   "app": {
-    "version": "0.18.4"
+    "version": "0.18.5"
   },
   "security": {
     "external_protocols": [
