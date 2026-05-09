@@ -184,7 +184,8 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            dist/*-${{ matrix.arch }}*.exe
+            dist/*-x64*.exe
+            dist/*-arm64*.exe
             dist/*-${{ matrix.arch }}*.dmg
             dist/*-${{ matrix.arch }}*.zip
         env:
@@ -225,7 +226,7 @@ jobs:
           - [64位(常用)]($DOWNLOAD_URL/ReportGenX-Setup-$VERSION-x64.exe) | [ARM64(不常用)]($DOWNLOAD_URL/ReportGenX-Setup-$VERSION-arm64.exe)
           
           ### macOS
-          - [Apple M芯片]($DOWNLOAD_URL/ReportGenX-$VERSION-arm64.dmg) | [Intel芯片]($DOWNLOAD_URL/ReportGenX-$VERSION-x64.dmg)
+          - [Apple M芯片]($DOWNLOAD_URL/ReportGenX-$VERSION-arm64-unsigned.dmg) | [Intel芯片]($DOWNLOAD_URL/ReportGenX-$VERSION-x64-unsigned.dmg)
 
           ### 校验和
           - [latest.yml]($DOWNLOAD_URL/latest.yml)
