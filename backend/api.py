@@ -830,7 +830,11 @@ def _process_url_value(url_text: str) -> dict[str, Any]:
         elif text.startswith('http'):
             try:
                 parsed = urlparse(text)
-                result["domain"] = parsed.netloc
+                netloc = parsed.netloc
+                host = netloc.split(':')[0] if ':' in netloc else netloc
+                result["domain"] = netloc
+                if re.match(ip_pattern, host):
+                    result["ip"] = host
             except (ValueError, AttributeError):
                 pass
 
