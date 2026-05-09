@@ -111,16 +111,17 @@ class DbDataReader:
                     vulnerability_list.append({"id": Vuln_id, "name": name})
                     
                     # STRICT ENGLISH KEYS as requested
+                    row_keys = row.keys()
                     vulnerabilities[Vuln_id] = {
                         "id": Vuln_id,
                         "Vuln_Name": name,
-                        "Vuln_Class": self._clean_str(row['Vuln_Class']),
-                        "Default_port": self._clean_str(row['Default_port']),
-                        "Risk_Level": self._clean_str(row['Risk_Level']),
-                        "Class_basis": self._clean_str(row['Class_basis']),
-                        "Vuln_Description": self._clean_str(row['Vuln_Description']),
-                        "Vuln_Hazards": self._clean_str(row['Vuln_Hazards']),
-                        "Repair_suggestions": self._clean_str(row['Repair_suggestions'])
+                        "Vuln_Class": self._clean_str(row['Vuln_Class']) if 'Vuln_Class' in row_keys else "",
+                        "Default_port": self._clean_str(row['Default_port']) if 'Default_port' in row_keys else "",
+                        "Risk_Level": self._clean_str(row['Risk_Level']) if 'Risk_Level' in row_keys else "",
+                        "Class_basis": self._clean_str(row['Class_basis']) if 'Class_basis' in row_keys else "",
+                        "Vuln_Description": self._clean_str(row['Vuln_Description']) if 'Vuln_Description' in row_keys else "",
+                        "Vuln_Hazards": self._clean_str(row['Vuln_Hazards']) if 'Vuln_Hazards' in row_keys else "",
+                        "Repair_suggestions": self._clean_str(row['Repair_suggestions']) if 'Repair_suggestions' in row_keys else ""
                     }
             
             return vulnerability_list, vulnerabilities
@@ -221,8 +222,10 @@ class DbDataReader:
         try:
             conn = sqlite3.connect(self.db_path)
             
-            # --- Schema Migration: Ensure Vuln_id columns exist ---
+            # --- Schema Migration: Ensure all required columns exist ---
             self._ensure_column_exists(conn, "vulnerabilities_Sheet1", "Vuln_id")
+            self._ensure_column_exists(conn, "vulnerabilities_Sheet1", "Class_basis")
+            self._ensure_column_exists(conn, "vulnerabilities_Sheet1", "Vuln_Hazards")
             
             cursor = conn.cursor()
             
@@ -279,6 +282,8 @@ class DbDataReader:
             
             # --- Schema Migration ---
             self._ensure_column_exists(conn, "vulnerabilities_Sheet1", "Vuln_id")
+            self._ensure_column_exists(conn, "vulnerabilities_Sheet1", "Class_basis")
+            self._ensure_column_exists(conn, "vulnerabilities_Sheet1", "Vuln_Hazards")
             
             cursor = conn.cursor()
             
