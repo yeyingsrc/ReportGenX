@@ -36,10 +36,13 @@ jobs:
           node-version: 24
 
       - name: Install Node dependencies
-        run: npm install --no-fund --no-audit --ignore-scripts
+        run: npm install --no-fund --no-audit
 
-      - name: Install Playwright Electron
-        run: npx playwright install electron
+      - name: Force Electron binary download
+        run: force_no_cache=true node node_modules/electron/install.js
+
+      - name: Verify Electron
+        run: npx electron --version
 
       - name: Check version sync
         run: npm run check-version
