@@ -23,6 +23,10 @@ async function runSmoke() {
   try {
     page = await electronApp.firstWindow()
     await page.waitForSelector('#btn-open-toolbox', { timeout: 120000 })
+    await page.waitForFunction(() => {
+      const el = document.getElementById('api-status-text')
+      return el && el.innerText === 'Connected'
+    }, { timeout: 30000 })
     await page.click('#btn-open-toolbox')
 
     await page.waitForSelector('.toolbox-nav-item[data-target="view-settings"]', { timeout: 10000 })
