@@ -1,0 +1,37 @@
+# intrusion_report handler configuration
+# Generated from handler_config.py INTRUSION_REPORT config
+
+log_prefix: intrusion
+log_fields:
+  - intrusion_type_display
+  - severity_level
+  - unit_name
+  - victim_ip
+  - attack_method_display
+  - analyst_name
+  - report_time
+
+db_table: intrusion_report
+db_fields:
+  report_id: report_id
+  intrusion_type: intrusion_type_display
+  severity_level: severity_level
+  discovery_time: discovery_time
+  report_time: report_time
+  analyst_name: analyst_name
+  supplier_name: supplier_name
+  victim_ip: victim_ip
+  victim_hostname: victim_hostname
+  victim_os: victim_os
+  victim_service: victim_service
+  unit_name: unit_name
+  unit_type: unit_type
+  industry: industry
+  attack_method: attack_method_display
+  malware_name: malware_name
+  malware_path: malware_path
+  malware_hash: malware_hash
+  c2_address: c2_address
+  first_access_time: first_access_time
+  persistence_time: persistence_time
+  output_path: output_path

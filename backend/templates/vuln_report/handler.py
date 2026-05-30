@@ -1,212 +1,239 @@
 # -*- coding: utf-8 -*-
 """
 @Createtime: 2026-01-24
-@description: 漏洞报告处理器 - 处理风险隐患报告的生成逻辑
-使用Template Method模式消除重复的处理器方法
+@Updatetime: 2026-05-29
+@description: 漏洞报告处理器 - pure function interface with GenerationContext injection.
+
+Template exposes:
+    preprocess(data, config) -> dict
+    validate(data, config, template_info) -> (bool, list)
+    generate(data, ctx) -> (bool, str, str)
+
+No class inheritance. All SDK services accessed via ctx (GenerationContext).
 """
 
-from typing import Dict, Any, List, Tuple, Optional
+import os
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
-from core.handler_utils import BaseTemplateHandlerEnhanced, ErrorHandler
-from core.base_handler import register_handler
-from core.template_manager import TemplateManager
-from core.logger import setup_logger
-from core.document_editor import DocumentEditor
-from core.document_image_processor import DocumentImageProcessor
-
-# 初始化日志记录器
-logger = setup_logger('VulnReportHandler')
+from core import gen_report_id, set_default_dates, set_supplier_defaults
 
 
-@register_handler("vuln_report")
-class VulnReportHandler(BaseTemplateHandlerEnhanced):
+# ═══════════════════════════════════════════════════════════════════
+# Constants
+# ═══════════════════════════════════════════════════════════════════
+
+ALERT_LEVEL_MAP = {
+    "高危": "2级",
+    "中危": "3级",
+    "低危": "4级",
+    "信息性": "5级",
+}
+
+# ═══════════════════════════════════════════════════════════════════
+# Pure functions — template business logic
+# ═══════════════════════════════════════════════════════════════════
+
+def preprocess(data: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    漏洞报告处理器
-    
-    负责处理风险隐患报告的生成，包括：
-    - 自动生成隐患编号
-    - 根据隐患级别计算预警级别
-    - 处理 ICP 截图和漏洞证据截图
-    - 记录报告日志
-    
-    使用Template Method模式，自动继承日志和数据库记录方法。
+    Data preprocessing.
+
+    1. Generate vulnerability ID (if empty)
+    2. Calculate alert level
+    3. Set default discovery date
+    4. Set supplier defaults
+    5. Set city/region defaults
+    6. Build report name
+    7. Combine vuln description + harm
+    8. Set report time
     """
-    
-    # 定义处理器类型 - 自动从配置中获取日志字段、前缀、数据库表等
-    HANDLER_TYPE = 'vuln_report'
-    
-    # 隐患级别 -> 预警级别 映射
-    ALERT_LEVEL_MAP = {
-        "高危": "2级",
-        "中危": "3级",
-        "低危": "4级",
-        "信息性": "5级"
-    }
-    
-    def __init__(
-        self,
-        template_manager: TemplateManager,
-        template_id: str,
-        config: Optional[Dict[str, Any]] = None,
-    ):
-        super().__init__(template_manager, template_id, config)
-        self.output_dir = ""  # 在 generate 时设置
-    
-    def preprocess(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        数据预处理
-        
-        1. 生成隐患编号 (如果为空)
-        2. 计算预警级别
-        3. 设置默认日期
-        4. 构建报告名称
-        """
-        processed = data.copy()
-        
-        # 1. 生成隐患编号
-        if not processed.get('vulnerability_id'):
-            processed['vulnerability_id'] = self.generate_report_id(prefix="YHBH", use_sequence=True)
-        
-        # 2. 计算预警级别
-        hazard_level = processed.get('hazard_level', '高危')
-        processed['alert_level'] = self.ALERT_LEVEL_MAP.get(hazard_level, '2级')
-        
-        # 3. 设置发现时间（使用基类辅助方法）
-        self._set_default_dates(processed, ['discovery_date'])
-        
-        # 4. 设置技术支持单位（使用基类辅助方法）
-        self._set_supplier_defaults(processed)
-        
-        # 5. 设置城市/地区默认值
-        if not processed.get('city'):
-            processed['city'] = self.config.get('city', '北京')
-        if not processed.get('region'):
-            processed['region'] = self.config.get('region', '海淀区')
-        
-        # 6. 构建报告名称
-        unit_name = processed.get('unit_name', '')
-        website_name = processed.get('website_name', '')
-        vul_name = processed.get('vul_name', '')
-        report_name = f"{unit_name}{website_name}存在{vul_name}漏洞".replace("漏洞漏洞", "漏洞")
-        processed['report_name'] = report_name
-        
-        # 7. 拼接漏洞描述和危害
-        vul_description = processed.get('vul_description', '')
-        vul_harm = processed.get('vul_harm', '')
-        if vul_harm:
-            processed['vul_description_full'] = f"{vul_description}{vul_harm}"
-        else:
-            processed['vul_description_full'] = vul_description
-        
-        # 8. 设置报告时间
-        processed['report_time'] = self.get_current_date()
-        
-        return processed
-    
-    def validate(self, data: Dict[str, Any]) -> Tuple[bool, List[str]]:
-        """
-        数据验证
-        
-        除了基类验证外，添加漏洞报告特定的验证
-        """
-        # 先执行基类验证
-        is_valid, errors = super().validate(data)
-        
-        # 添加自定义验证
-        # 验证漏洞名称
-        if not data.get('vul_name') and not data.get('vul_name_select'):
-            errors.append("请选择或输入漏洞名称")
-            is_valid = False
-        
-        # 验证 URL 格式
-        url = data.get('url', '')
-        if url and not (url.startswith('http://') or url.startswith('https://') or self.is_valid_ip(url)):
-            # 允许宽松的 URL 格式
-            pass
-        
-        return is_valid, errors
-    
-    def generate(self, data: Dict[str, Any], output_dir: str) -> Tuple[bool, str, str]:
-        """
-        生成漏洞报告
-        """
-        self.output_dir = output_dir
-        
-        try:
-            # 1. 加载文档
-            doc = self.load_document()
-            if not doc:
-                return False, "", "模板文件加载失败"
-            
-            # 2. 构建替换字典
-            extra_replacements = {
-                "#supplierName#": data.get('supplier_name', self.config.get('supplierName', '')),
-                "#reportTime#": data.get('report_time', self.get_current_date()),
-                "#reportName#": data.get('report_name', ''),
-                "#vulDescription#": data.get('vul_description_full', data.get('vul_description', '')),
-                # 兼容旧模板占位符
-                "#customerCompanyName#": data.get('unit_name', ''),
-                "#target#": data.get('url', ''),
-            }
-            
-            replacements = self.build_replacements(data, extra_replacements)
-            
-            # 3. 替换文本
-            editor = DocumentEditor(doc)
-            editor.replace_report_text(replacements)
-            
-            # 4. 处理图片
-            img_processor = DocumentImageProcessor(doc, [])
-            
-            # 处理备案截图（使用基类方法）
-            self.process_single_image(img_processor, "#screenshotoffiling#", data.get('icp_screenshot'))
-            
-            # 处理漏洞证据截图（使用基类方法）
-            self.process_image_list(img_processor, '#evidenceScreenshot#', data.get('vuln_evidence_images', []))
-            
-            # 5. 保存报告
-            output_path = self._generate_output_path(data)
-            final_path = self.save_document(doc, output_path)
-            
-            return True, final_path, "报告生成成功"
-            
-        except Exception as e:
-            return ErrorHandler.handle_generation_error('generate', e, logger)
-    
-    def _generate_output_path(self, data: Dict[str, Any]) -> str:
-        """生成输出文件路径"""
-        unit_name = data.get('unit_name', 'Unknown')
-        filename = self._build_output_filename(data)
-        return self.build_output_path(self.output_dir, unit_name, filename)
-    
-    def _build_output_filename(self, data: Dict[str, Any]) -> str:
-        """构建输出文件名"""
+    processed = data.copy()
+
+    # 1. Generate vulnerability ID
+    if not processed.get('vulnerability_id'):
+        processed['vulnerability_id'] = gen_report_id(prefix="YHBH", use_sequence=True)
+
+    # 2. Calculate alert level
+    hazard_level = processed.get('hazard_level', '高危')
+    processed['alert_level'] = ALERT_LEVEL_MAP.get(hazard_level, '2级')
+
+    # 3. Set discovery date
+    set_default_dates(processed, ['discovery_date'])
+
+    # 4. Set supplier defaults
+    set_supplier_defaults(processed, config)
+
+    # 5. Set city/region defaults
+    if not processed.get('city'):
+        processed['city'] = config.get('city', '北京')
+    if not processed.get('region'):
+        processed['region'] = config.get('region', '海淀区')
+
+    # 6. Build report name
+    unit_name = processed.get('unit_name', '')
+    website_name = processed.get('website_name', '')
+    vul_name = processed.get('vul_name', '')
+    report_name = f"{unit_name}{website_name}存在{vul_name}漏洞".replace("漏洞漏洞", "漏洞")
+    processed['report_name'] = report_name
+
+    # 7. Combine vuln description + harm
+    vul_description = processed.get('vul_description', '')
+    vul_harm = processed.get('vul_harm', '')
+    if vul_harm:
+        processed['vul_description_full'] = f"{vul_description}{vul_harm}"
+    else:
+        processed['vul_description_full'] = vul_description
+
+    # 8. Set report time
+    processed['report_time'] = datetime.now().strftime("%Y-%m-%d")
+
+    return processed
+
+
+def validate(
+    data: Dict[str, Any],
+    config: Dict[str, Any],
+    template_info: Any,
+) -> Tuple[bool, List[str]]:
+    """
+    Data validation — vulnerability report specific checks.
+    """
+    errors = []
+
+    # Check required fields from template info
+    if template_info:
+        for field_def in template_info.fields:
+            if field_def.required:
+                value = data.get(field_def.key, "")
+                if not value or (isinstance(value, str) and not value.strip()):
+                    errors.append(f"Field '{field_def.label}' is required")
+
+        # Check global validation rules
+        for rule in template_info.validation_rules:
+            if rule.rule == 'required':
+                for field_key in rule.fields:
+                    value = data.get(field_key, "")
+                    if not value or (isinstance(value, str) and not value.strip()):
+                        errors.append(rule.message)
+                        break
+
+    # Custom validation
+    if not data.get('vul_name') and not data.get('vul_name_select'):
+        errors.append("Please select or enter vulnerability name")
+
+    return len(errors) == 0, errors
+
+
+def generate(data: Dict[str, Any], ctx: Any) -> Tuple[bool, str, str]:
+    """
+    Generate vulnerability report.
+
+    Args:
+        data: Preprocessed form data
+        ctx: GenerationContext providing all framework services
+
+    Returns:
+        (success, output_path, message)
+    """
+    try:
+        # 1. Load document
+        doc = ctx.load_document()
+        if not doc:
+            return False, "", "Template file loading failed"
+
+        # 2. Build replacements
+        extra_replacements = {
+            "#supplierName#": data.get('supplier_name', ctx.config.get('supplierName', '')),
+            "#reportTime#": data.get('report_time', datetime.now().strftime("%Y-%m-%d")),
+            "#reportName#": data.get('report_name', ''),
+            "#vulDescription#": data.get('vul_description_full', data.get('vul_description', '')),
+            "#customerCompanyName#": data.get('unit_name', ''),
+            "#target#": data.get('url', ''),
+        }
+        replacements = ctx.build_replacements(data, extra_replacements)
+
+        # 3. Replace text
+        ctx.replace_text(replacements)
+
+        # 4. Process images
+        ctx.process_single_image('#screenshotoffiling#', data.get('icp_screenshot'))
+        ctx.process_image_list('#evidenceScreenshot#', data.get('vuln_evidence_images', []))
+
+        # 5. Save report
         region = data.get('region', '')
         hazard_type = data.get('hazard_type', '漏洞报告')
         report_name = data.get('report_name', 'Report')
         hazard_level = data.get('hazard_level', '高危')
-        return f"【{region}】【{hazard_type}】{report_name}【{hazard_level}】.docx"
-    
-    # 以下方法已删除 - 现在由BaseTemplateHandlerEnhanced通过配置自动提供:
-    # - _get_log_fields()      (从handler_config.py自动获取)
-    # - _get_log_prefix()      (从handler_config.py自动获取)
-    # - _get_db_table_name()   (从handler_config.py自动获取)
-    # - _build_db_record()     (从handler_config.py自动获取)
+        filename = f"【{region}】【{hazard_type}】{report_name}【{hazard_level}】.docx"
 
+        unit_name = data.get('unit_name', 'Unknown')
+        output_path = ctx.build_output_path(unit_name, filename)
+        final_path = ctx.save_document(doc, output_path)
+
+        return True, final_path, "Report generated successfully"
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return False, "", f"Report generation failed: {str(e)}"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Runtime adapter — bridges PluginRuntime descriptor protocol
+# ═══════════════════════════════════════════════════════════════════
 
 def execute(
     data: Dict[str, Any],
     output_dir: str,
-    template_manager: TemplateManager,
+    template_manager: Any,
     config: Optional[Dict[str, Any]] = None,
     template_id: str = "vuln_report",
 ) -> Dict[str, Any]:
     """Descriptor execution entrypoint for plugin runtime."""
-    handler = VulnReportHandler(template_manager, template_id, config)
-    return handler.run(data, output_dir)
+    from backend.core.generation_context import GenerationContext
+    from backend.core.logger import setup_logger
+    from backend.core.schema_loader import SchemaLoader
 
+    template_dir = os.path.join(template_manager.templates_dir, template_id)
+    template_info = SchemaLoader.load_schema(template_dir)
+    runtime_cfg = SchemaLoader.load_runtime(template_dir)
 
-LEGACY_HANDLER = VulnReportHandler
+    logger = setup_logger('VulnReport')
+    ctx = GenerationContext(template_dir, template_info, config, output_dir, logger)
+
+    # Preprocess
+    processed = preprocess(data, config or {})
+
+    # Validate
+    is_valid, errors = validate(processed, config or {}, template_info)
+    if not is_valid:
+        return {
+            "success": False,
+            "report_path": "",
+            "message": "Data validation failed: " + "; ".join(errors),
+            "errors": errors,
+        }
+
+    # Generate
+    success, path, msg = generate(processed, ctx)
+
+    # Postprocess
+    if success:
+        ctx.postprocess(
+            path, processed,
+            log_prefix=runtime_cfg.get('log_prefix', ''),
+            log_fields=runtime_cfg.get('log_fields', []),
+            db_table=runtime_cfg.get('db_table', ''),
+            db_name=f"{datetime.now().strftime('%Y-%m-%d')}_output.db",
+            db_field_map=runtime_cfg.get('db_fields', {}),
+        )
+
+    return {
+        "success": success,
+        "report_path": path,
+        "message": msg,
+        "errors": errors if not success else [],
+    }
 
 
 PLUGIN = {

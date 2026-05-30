@@ -128,38 +128,65 @@ class DocumentEditor:
             paragraph: 原始段落
             lines: 要插入的文本行列表
         """
-        # 获取段落的父元素和位置
+        from docx.text.paragraph import Paragraph
+
+        # 1. 保存原始 XML 副本（修改前），用于后续行的格式克隆
+        original_element = deepcopy(paragraph._element)
+        
+        # 2. 保存第一段 run 的格式
+        first_run = paragraph.runs[0] if paragraph.runs else None
+        font_name = first_run.font.name if first_run else None
+        font_size = first_run.font.size if first_run else None
+        font_bold = first_run.font.bold if first_run else None
+
+        # 3. 获取父元素和位置
         parent = paragraph._element.getparent()
         index = list(parent).index(paragraph._element)
         
-        # 第一行替换原段落
-        paragraph.text = lines[0]
+        # 4. 第一行替换原段落，保留格式
+        for run in paragraph.runs:
+            run.text = ''
+        if first_run:
+            first_run.text = lines[0]
+            if font_name:
+                first_run.font.name = font_name
+            if font_size:
+                first_run.font.size = font_size
+            first_run.font.bold = font_bold
         
-        # 后续行插入新段落
+        # 5. 后续行插入新段落（从原始 XML 克隆，保留格式）
         for i, line in enumerate(lines[1:], 1):
-            # 复制原段落的 XML 结构（保留格式）
-            new_p = deepcopy(paragraph._element)
-            # 清空文本内容
-            for child in new_p.iterchildren():
-                if child.tag == qn('w:r'):
-                    new_p.remove(child)
-            # 插入到正确位置
+            new_p = deepcopy(original_element)
+            # 清空文本，保留第一个 run 写入新内容
+            runs = new_p.findall(qn('w:r'))
+            for j, r in enumerate(runs):
+                for t in r.findall(qn('w:t')):
+                    if j == 0:
+                        t.text = line
+                    else:
+                        r.getparent().remove(r)
             parent.insert(index + i, new_p)
-            # 通过 python-docx 设置文本
-            from docx.text.paragraph import Paragraph
+            # 重新应用格式到新段落
             new_para = Paragraph(new_p, paragraph._parent)
-            new_para.text = line
+            if new_para.runs:
+                new_r = new_para.runs[0]
+                if font_name:
+                    new_r.font.name = font_name
+                if font_size:
+                    new_r.font.size = font_size
+                new_r.font.bold = font_bold
 
-    def replace_report_text(self, replacements, enable_risk_color=False):
+    def replace_report_text(self, replacements, enable_risk_color=False, risk_key="#overall_risk_level#"):
         """
         替换文档中的占位符
         
         Args:
             replacements: 占位符替换字典
             enable_risk_color: 是否启用风险等级颜色（仅渗透测试报告使用）
+            risk_key: 风险等级占位符 key，默认 "#overall_risk_level#"
         """
         # 风险等级占位符
-        risk_level_key = "#overall_risk_level#"
+        risk_level_key = risk_key
         risk_level_value = replacements.get(risk_level_key, "")
         
         # 1. 处理段落 (Paragraphs)
@@ -187,7 +214,7 @@ class DocumentEditor:
 
             needs_multiline = False
             for key, value in replacements.items():
-                if key in full_text and '\n' in str(value):
+                if key in full_text and '\n' in str(value).strip('\n'):
                     needs_multiline = True
                     break
             
@@ -201,7 +228,7 @@ class DocumentEditor:
                 if len(lines) > 1:
                     self._insert_paragraphs_after(paragraph, lines)
                 else:
-                    paragraph.text = full_text
+                    paragraph.text = full_text.rstrip()
             else:
                 # 优先尝试 run 级别替换（保留格式）
                 replaced_keys = self._replace_in_runs(paragraph, replacements)

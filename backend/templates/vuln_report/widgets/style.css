@@ -1,0 +1,94 @@
+/* vuln_list widget styles */
+.dynamic-vuln-list-container {
+    display: flex;
+    gap: 20px;
+    min-height: 400px;
+}
+
+.dynamic-vuln-sidebar {
+    width: 200px;
+    flex-shrink: 0;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    background: #fafafa;
+    padding: 10px;
+}
+
+.dynamic-vuln-sidebar-title {
+    font-weight: bold;
+    padding: 8px;
+    border-bottom: 1px solid #e0e0e0;
+    margin-bottom: 10px;
+}
+
+.dynamic-vuln-sidebar-item {
+    padding: 10px;
+    margin-bottom: 5px;
+    border-radius: 6px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.2s;
+}
+
+.dynamic-vuln-sidebar-item:hover {
+    background: #f0f0f0;
+}
+
+.dynamic-vuln-sidebar-item.active {
+    background: #e6f7ff;
+    border-color: #1890ff;
+}
+
+.dynamic-vuln-main-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.dynamic-vuln-sidebar-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.dynamic-vuln-card-content {
+    padding: 15px 0;
+}
+
+.dynamic-vuln-item-card {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 20px;
+    background: #fff;
+    display: none;
+}
+
+.dynamic-vuln-item-card.active {
+    display: block;
+}
+
+.dynamic-vuln-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #eee;
+}
+
+.dynamic-vuln-index-badge {
+    background: var(--primary-color, #1890ff);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+.dynamic-vuln-empty-tip {
+    text-align: center;
+    padding: 60px 20px;
+    color: #999;
+    border: 2px dashed #e0e0e0;
+    border-radius: 8px;
+}

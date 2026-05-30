@@ -27,15 +27,16 @@ class HandlerRegistry:
     def get_handler(
         cls,
         template_id: str,
-        template_manager: Any,
+        template_dir: str,
+        template_info: Any,
         config: Optional[Dict[str, Any]] = None,
     ) -> Optional[Any]:
-        """获取处理器实例。"""
+        """获取处理器实例 (自包含模式: template_dir + template_info 替代 template_manager)。"""
         handler_class = cls._handlers.get(template_id)
         if not handler_class:
             return None
 
-        return handler_class(template_manager, template_id, config)
+        return handler_class(template_dir, template_info, config)
 
     @classmethod
     def has_handler(cls, template_id: str) -> bool:
@@ -51,13 +52,3 @@ class HandlerRegistry:
     def clear(cls) -> None:
         """清空所有已注册处理器。"""
         cls._handlers.clear()
-
-
-def register_handler(template_id: str):
-    """装饰器：注册模板处理器。"""
-
-    def decorator(handler_class: Type[Any]):
-        HandlerRegistry.register(template_id, handler_class)
-        return handler_class
-
-    return decorator

@@ -19,6 +19,7 @@
                 <span id="version-info" style="margin-left: 15px; font-weight: bold;"></span>
             </div>
             <div id="version-warning-banner" class="version-warning-banner" style="display:none;"></div>
+            <div id="update-banner" class="version-warning-banner" style="display:none; background: #e6f7ff; color: #1890ff; border-color: #91d5ff;"></div>
         </header>
 
         <!-- 动态表单容器 (所有模板使用动态表单) -->
@@ -117,18 +118,24 @@
                                 <div class="manager-header-row">
                                      <h4 class="column-title">漏洞列表</h4>
                                      <span class="manager-count-badge" id="vuln-count-badge"></span>
+                                     <div class="inline-header-group">
+                                         <button type="button" id="btn-vuln-import" class="btn-mini">📥 导入</button>
+                                         <input type="file" id="vuln-import-input" accept=".xlsx,.xls" style="display:none">
+                                         <button type="button" id="btn-vuln-export" class="btn-mini">📤 导出</button>
+                                         <button type="button" id="btn-vuln-template" class="btn-mini">📋 模板</button>
+                                     </div>
                                 </div>
                                 <div class="input-group manager-search-group">
                                      <span class="manager-search-icon">🔍</span>
                                      <input type="text" id="vuln-manager-search" placeholder="搜索漏洞..." class="manager-search-input">
                                 </div>
                                 
-                                <div class="vuln-list-header">
-                                    <span class="vuln-header-name">漏洞名称</span>
-                                    <span class="vuln-header-category">分类</span>
-                                    <span class="vuln-header-level">级别</span>
-                                </div>
-                                <div class="vuln-list-container manager-list-scroll" id="vuln-manager-list">
+                                 <div class="vuln-list-header">
+                                     <span class="vuln-header-name">漏洞名称</span>
+                                     <span class="vuln-header-category">分类</span>
+                                     <span class="vuln-header-level">级别</span>
+                                 </div>
+                                 <div class="vuln-list-container manager-list-scroll" id="vuln-manager-list">
                                 </div>
                             </div>
 
@@ -207,6 +214,10 @@
                                 </div>
                                 <div class="inline-header-group">
                                     <button type="button" id="btn-icp-add" class="btn-mini btn-mini-success">+ 新增</button>
+                                    <button type="button" id="btn-icp-import" class="btn-mini">📥 导入</button>
+                                    <input type="file" id="icp-import-input" accept=".xlsx,.xls" style="display:none">
+                                    <button type="button" id="btn-icp-export" class="btn-mini">📤 导出</button>
+                                    <button type="button" id="btn-icp-template" class="btn-mini">📋 模板</button>
                                     <button type="button" id="btn-icp-batch-delete" class="btn-mini btn-mini-danger hidden-inline">🗑️ 批量删除</button>
                                 </div>
                             </div>
@@ -388,17 +399,17 @@
                                     <div class="settings-field-stack">
                                         <div class="settings-field settings-field-wide">
                                             <label for="runtime-force-legacy">强制使用旧模式的模板（可空，逗号分隔）</label>
-                                            <input type="text" id="runtime-force-legacy" placeholder="vuln_report, intrusion_report">
+                                            <input type="text" id="runtime-force-legacy" placeholder="逗号分隔模板ID">
                                             <small class="settings-field-help">只有某个模板在新模式下不稳定时再填。留空表示所有模板都按默认策略运行。</small>
                                         </div>
                                         <div class="settings-field settings-field-wide">
                                             <label for="runtime-enabled-templates">隔离模式启用模板名单（可空，逗号分隔）</label>
-                                            <input type="text" id="runtime-enabled-templates" placeholder="Attack_Defense, penetration_test">
+                                            <input type="text" id="runtime-enabled-templates" placeholder="逗号分隔模板ID">
                                             <small class="settings-field-help">只让指定模板参与 isolated 试运行。适合先挑少量模板做验证，普通使用建议留空。</small>
                                         </div>
                                         <div class="settings-field settings-field-wide">
                                             <label for="runtime-disabled-templates">隔离模式禁用模板名单（可空，逗号分隔）</label>
-                                            <input type="text" id="runtime-disabled-templates" placeholder="vuln_report">
+                                            <input type="text" id="runtime-disabled-templates" placeholder="逗号分隔模板ID">
                                             <small class="settings-field-help">当某些模板确认不适合 isolated 时再填写。留空表示不额外禁用。</small>
                                         </div>
                                         <div class="settings-field settings-field-wide">

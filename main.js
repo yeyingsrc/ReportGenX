@@ -1,9 +1,10 @@
-const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, shell, dialog, Menu } = require('electron')
 const path = require('path')
 const http = require('http')
 const crypto = require('crypto')
-const { spawn, execSync } = require('child_process')
+const { spawn } = require('child_process')
 const { loadSharedConfig, encodeBootstrapArgs } = require('./shared-config-utils')
+const log = require('electron-log')
 
 let pythonProcess = null
 let mainWindow = null
@@ -35,7 +36,7 @@ function isExternalUrlAllowed(rawUrl) {
 
 async function openExternalSafely(rawUrl, source) {
   if (!isExternalUrlAllowed(rawUrl)) {
-    console.warn(`[Security] Blocked external URL from ${source}: ${rawUrl}`)
+    log.warn(`[Security] Blocked external URL from ${source}: ${rawUrl}`)
     return false
   }
 
@@ -48,7 +49,7 @@ const gotTheLock = app.requestSingleInstanceLock()
 
 if (!gotTheLock) {
   // 如果获取锁失败，说明已有实例在运行，直接退出
-  console.log('Another instance is already running. Exiting...')
+  log.info('Another instance is already running. Exiting...')
   app.quit()
 } else {
   // 当尝试启动第二个实例时，聚焦到第一个实例的窗口
@@ -80,7 +81,7 @@ function startPythonBackend() {
     args = [] // Executable handles main entry point
   } else {
     // Development Mode
-    console.log(`Starting Python backend in dev mode: ${cwd}`)
+    log.info(`Starting Python backend in dev mode: ${cwd}`)
   }
 
   pythonProcess = spawn(backendExecutable, args, {
@@ -94,21 +95,21 @@ function startPythonBackend() {
   })
 
   pythonProcess.stdout.on('data', (data) => {
-    console.log(`Python stdout: ${data.toString('utf-8')}`)
+    log.info(`Python stdout: ${data.toString('utf-8')}`)
   })
 
   pythonProcess.stderr.on('data', (data) => {
-    console.error(`Python stderr: ${data.toString('utf-8')}`)
+    log.warn(`Python stderr: ${data.toString('utf-8')}`)
   })
 
   pythonProcess.on('error', (err) => {
-    console.error(`Python process failed to start: ${err.message}`)
+    log.error(`Python process failed to start: ${err.message}`)
   })
 
   pythonProcess.on('close', (code) => {
-    console.log(`Python process exited with code ${code}`)
+    log.info(`Python process exited with code ${code}`)
     if (!isQuitting && code !== 0 && code !== null) {
-      dialog.showErrorBox('后端服务异常退出', `Python 后端退出码: ${code}`)
+      log.error(`Backend process exited unexpectedly with code ${code}`)
     }
   })
 }
@@ -162,6 +163,141 @@ async function waitForBackendReady(maxAttempts = 40, delayMs = 250) {
   throw new Error(`Backend is not ready at http://${SERVER_HOST}:${SERVER_PORT}`)
 }
 
+function buildMenu() {
+  const isMac = process.platform === 'darwin'
+
+  const template = [
+    // App 菜单 (macOS 独占)
+    ...(isMac ? [{
+      label: app.name,
+      submenu: [
+        { label: '关于 ReportGenX', role: 'about' },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' }
+      ]
+    }] : []),
+
+    // 文件(&F)
+    {
+      label: '文件(&F)',
+      submenu: [
+        {
+          label: '工具箱',
+          accelerator: 'Ctrl+T',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.executeJavaScript('document.getElementById("btn-open-toolbox")?.click()')
+            }
+          }
+        },
+        {
+          label: '生成报告',
+          accelerator: 'Ctrl+Enter',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.executeJavaScript('document.getElementById("btn-dynamic-generate")?.click()')
+            }
+          }
+        },
+        { type: 'separator' },
+        ...(isMac ? [] : [
+          { label: '退出', accelerator: 'Ctrl+Q', role: 'quit' }
+        ])
+      ]
+    },
+
+    // 编辑(&E)
+    {
+      label: '编辑(&E)',
+      submenu: [
+        { label: '撤销', role: 'undo' },
+        { label: '重做', role: 'redo' },
+        { type: 'separator' },
+        { label: '剪切', role: 'cut' },
+        { label: '复制', role: 'copy' },
+        { label: '粘贴', role: 'paste' },
+        { label: '全选', role: 'selectAll' }
+      ]
+    },
+
+    // 视图(&V)
+    {
+      label: '视图(&V)',
+      submenu: [
+        { label: '重新加载', role: 'reload' },
+        { label: '强制重新加载', role: 'forceReload' },
+        { label: '开发者工具', role: 'toggleDevTools' },
+        { type: 'separator' },
+        { label: '放大', role: 'zoomIn' },
+        { label: '缩小', role: 'zoomOut' },
+        { label: '重置缩放', role: 'resetZoom' }
+      ]
+    },
+
+    // 帮助(&H)
+    {
+      label: '帮助(&H)',
+      submenu: [
+        ...(isMac ? [] : [
+          { label: '关于 ReportGenX', role: 'about' },
+          { type: 'separator' }
+        ]),
+        {
+          label: '检查更新',
+          click: () => {
+            if (mainWindow) {
+              mainWindow.webContents.executeJavaScript(`
+                (async function () {
+                  try {
+                    var result = await AppAPI._request('/api/check-update')
+                    if (result && result.has_update) {
+                      var banner = document.getElementById('update-banner')
+                      if (banner) {
+                        banner.textContent = ''
+                        banner.appendChild(document.createTextNode('新版本 '))
+                        var strong = document.createElement('strong')
+                        strong.textContent = result.latest_version
+                        banner.appendChild(strong)
+                        banner.appendChild(document.createTextNode(' 可用 (当前 ' + result.current_version + ') — '))
+                        var link = document.createElement('a')
+                        link.href = '#'
+                        link.id = 'update-download-link'
+                        link.textContent = '查看详情'
+                        link.addEventListener('click', function (e) {
+                          e.preventDefault()
+                          if (window.electronAPI && window.electronAPI.openExternal) {
+                            window.electronAPI.openExternal(result.download_url)
+                          } else {
+                            window.open(result.download_url, '_blank')
+                          }
+                        })
+                        banner.appendChild(link)
+                        banner.style.display = 'block'
+                      }
+                    } else {
+                      if (window.AppUtils) AppUtils.showToast('当前已是最新版本', 'info')
+                    }
+                  } catch (e) {
+                    if (window.AppUtils) AppUtils.showToast('检查更新失败', 'error')
+                  }
+                })()
+              `)
+            }
+          }
+        }
+      ]
+    }
+  ]
+
+  return Menu.buildFromTemplate(template)
+}
+
 function createWindow() {
   const bootstrapArgs = encodeBootstrapArgs(sharedConfig, APP_API_TOKEN)
 
@@ -204,6 +340,7 @@ app.whenReady().then(async () => {
   try {
     startPythonBackend()
     await waitForBackendReady()
+    Menu.setApplicationMenu(buildMenu())
     createWindow()
 
     app.on('activate', () => {
@@ -234,11 +371,19 @@ app.on('will-quit', () => {
     // Windows: 使用 taskkill 杀死进程树（包括所有子进程）
     // Unix: 尝试杀死进程组
     if (process.platform === 'win32') {
-      try {
-        execSync(`taskkill /pid ${pythonProcess.pid} /T /F`, { stdio: 'ignore' })
-      } catch (_e) {
-        // 忽略错误（进程可能已退出）
-      }
+      const killer = spawn('taskkill', ['/pid', String(pythonProcess.pid), '/T', '/F'], { stdio: 'ignore' })
+      const killTimeout = setTimeout(() => {
+        log.warn(`taskkill timed out after 3s for PID ${pythonProcess.pid}, abandoning`)
+        killer.kill('SIGKILL')
+      }, 3000)
+      killer.on('close', (code) => {
+        clearTimeout(killTimeout)
+        if (code === 0) {
+          log.info(`Backend process tree killed (PID ${pythonProcess.pid})`)
+        } else {
+          log.warn(`taskkill exited with code ${code} for PID ${pythonProcess.pid}`)
+        }
+      })
     } else {
       try {
         process.kill(-pythonProcess.pid, 'SIGKILL')

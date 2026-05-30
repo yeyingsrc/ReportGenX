@@ -1,0 +1,35 @@
+# vuln_report handler configuration
+# Generated from handler_config.py VULN_REPORT config
+
+protected: true
+
+log_prefix: vuln
+log_fields:
+  - hazard_type
+  - unit_name
+  - url
+  - vuln_name
+  - supplier_name
+  - hazard_level
+  - report_time
+
+db_table: vuln_report
+db_fields:
+  vulnerability_id: vulnerability_id
+  hazard_type: hazard_type
+  hazard_level: hazard_level
+  alert_level: alert_level
+  vuln_name: vuln_name
+  unit_type: unit_type
+  industry: industry
+  unit_name: unit_name
+  url: url
+  website_name: website_name
+  domain: domain
+  ip: ip
+  icp_number: icp_number
+  discovery_date: discovery_date
+  city: city
+  region: region
+  supplier_name: supplier_name
+  report_time: report_time

@@ -5,6 +5,7 @@
 @description: 统一文档图片处理器 - 处理所有模板的图文插入需求
 """
 
+import copy
 import os
 import tempfile
 from typing import List, Dict, Union, Optional
@@ -42,9 +43,10 @@ class DocumentImageProcessor:
         """
         DocumentEditor.clear_paragraph_indent(paragraph)
 
-    def _insert_image_run(self, paragraph, img_path: str, max_width_inches: float = 6.0):
+    def insert_image_run(self, paragraph, img_path: str, max_width_inches: float = 6.0):
         """
-        【核心功能】向段落插入图片，自动计算最佳尺寸。
+        向段落插入图片，自动计算最佳尺寸。
+        公开方法，供模板在动态构造文档结构时直接调用（无需占位符）。
         """
         resolved_path = self._resolve_path(img_path)
         
@@ -81,6 +83,22 @@ class DocumentImageProcessor:
         """
         【新增方法】直接向指定的表格单元格插入多张图片。
         """
+        # 0. 保存原单元格的段落样式和字体，避免新插入文本丢失模板格式
+        original_style = None
+        original_rPr = None
+        if cell.paragraphs:
+            first_para = cell.paragraphs[0]
+            try:
+                original_style = first_para.style
+            except Exception:
+                pass
+            runs = first_para._element.findall(qn('w:r'))
+            for run_elem in runs:
+                rPr = run_elem.find(qn('w:rPr'))
+                if rPr is not None:
+                    original_rPr = rPr
+                    break
+
         # 1. 清空单元格原有内容
         # 注意：不能直接 cell.text = ""，因为这会移除所有段落属性
         # 我们保留第一个段落用于重用，或者清空所有段落
@@ -106,14 +124,22 @@ class DocumentImageProcessor:
             # 插入描述文字
             if desc:
                 p = cell.add_paragraph()
-                p.add_run(desc)
+                if original_style:
+                    try:
+                        p.style = original_style
+                    except Exception:
+                        pass
+                run_obj = p.add_run(desc)
+                if original_rPr is not None:
+                    cloned_rPr = copy.deepcopy(original_rPr)
+                    run_obj._element.insert(0, cloned_rPr)
                 p.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
                 self._clear_paragraph_indent(p)
 
             # 插入图片
             if img_path:
                 p = cell.add_paragraph()
-                self._insert_image_run(p, img_path, max_width_inches)
+                self.insert_image_run(p, img_path, max_width_inches)
                 p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
                 self._clear_paragraph_indent(p) # 关键：防止图片歪斜
 
@@ -155,11 +181,18 @@ class DocumentImageProcessor:
             parent = para._element.getparent()
             index = parent.index(para._element)
             
+            # 保存原始段落的格式属性（在移除之前）
+            original_pPr = para._element.find(qn('w:pPr'))
+            
+            # 保存原始段落的 run 级格式（字体、字号、颜色等）
+            runs = para._element.findall(qn('w:r'))
+            original_rPr = None
+            if runs:
+                original_rPr = runs[0].find(qn('w:rPr'))
+            
             # 移除占位符段落
             parent.remove(para._element)
             
-            # 倒序插入，保证顺序正确（因为总是插在 index 位置）
-            # 或者正序插入，每次 index + 1
             current_index = index
             
             for item in image_list:
@@ -173,9 +206,19 @@ class DocumentImageProcessor:
                 # 插入描述
                 if desc:
                     new_p = OxmlElement('w:p')
+                    if original_pPr is not None:
+                        cloned_pPr = copy.deepcopy(original_pPr)
+                        # 移除缩进节点，避免与 _clear_paragraph_indent 冲突
+                        ind = cloned_pPr.find(qn('w:ind'))
+                        if ind is not None:
+                            cloned_pPr.remove(ind)
+                        new_p.append(cloned_pPr)
                     parent.insert(current_index, new_p)
                     p = Paragraph(new_p, self.doc)
-                    p.add_run(desc)
+                    run = p.add_run(desc)
+                    if original_rPr is not None:
+                        cloned_rPr = copy.deepcopy(original_rPr)
+                        run._element.insert(0, cloned_rPr)
                     p.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
                     self._clear_paragraph_indent(p)
                     current_index += 1
@@ -183,9 +226,15 @@ class DocumentImageProcessor:
                 # 插入图片
                 if img_path:
                     new_p = OxmlElement('w:p')
+                    if original_pPr is not None:
+                        cloned_pPr = copy.deepcopy(original_pPr)
+                        ind = cloned_pPr.find(qn('w:ind'))
+                        if ind is not None:
+                            cloned_pPr.remove(ind)
+                        new_p.append(cloned_pPr)
                     parent.insert(current_index, new_p)
                     p = Paragraph(new_p, self.doc)
-                    self._insert_image_run(p, img_path, max_width_inches=6.0)
+                    self.insert_image_run(p, img_path, max_width_inches=6.0)
                     p.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
                     self._clear_paragraph_indent(p)
                     current_index += 1

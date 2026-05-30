@@ -14,12 +14,9 @@ window.AppFormRendererFieldOps = {
         const isWideField = field.type === 'textarea'
             || field.type === 'image'
             || field.type === 'image_list'
-            || field.type === 'db_screenshot_group'
-            || field.type === 'server_type_group'
+            || field.type === 'grouped_image_list'
             || field.type === 'checkbox_group'
-            || field.type === 'target_list'
-            || field.type === 'tester_info_list'
-            || field.type === 'vuln_list'
+            || field.type === 'widget'
             || field.type === 'array';
 
         wrapper.className = `${isWideField ? 'col-12' : 'col-4'} form-group`;
@@ -56,9 +53,27 @@ window.AppFormRendererFieldOps = {
     },
 
     createInput(renderer, field, pasteBtn = null) {
+        // ── Layer 1: Widget dispatch (external template widgets) ──────
+        if (field.type === 'widget' && field.widget) {
+            const container = document.createElement('div');
+            container.id = field.key;
+            renderer.loadTemplateWidget(field).then(result => {
+                if (result) container.appendChild(result);
+            });
+            return container;
+        }
+
+        // ── Layer 2: Built-in composite types ─────────────────────────
         let el;
 
-        if (field.type === 'searchable_select') {
+        if (field.type === 'array') {
+            el = renderer.createArrayField(field);
+        } else if (field.type === 'grouped_image_list') {
+            el = renderer.createGroupedImageList(field);
+        }
+
+        // ── Layer 3: Built-in primitive types ─────────────────────────
+        else if (field.type === 'searchable_select') {
             el = renderer.createSearchableSelect(field);
         } else if (field.type === 'select') {
             el = document.createElement('select');
@@ -108,19 +123,8 @@ window.AppFormRendererFieldOps = {
             el = renderer.createImageUploader(field, false, pasteBtn);
         } else if (field.type === 'image_list') {
             el = renderer.createImageUploader(field, true, pasteBtn);
-        } else if (field.type === 'db_screenshot_group') {
-            el = renderer.createDbScreenshotGroup(field);
-        } else if (field.type === 'server_type_group') {
-            el = renderer.createServerTypeGroup(field);
-        } else if (field.type === 'target_list') {
-            el = renderer.createTargetList(field);
-        } else if (field.type === 'tester_info_list') {
-            el = renderer.createTesterInfoList(field);
-        } else if (field.type === 'vuln_list') {
-            el = renderer.createVulnList(field);
-        } else if (field.type === 'array') {
-            el = renderer.createArrayField(field);
         } else {
+            // Default: text input
             el = document.createElement('input');
             el.type = 'text';
             el.placeholder = field.placeholder || '';
@@ -150,39 +154,15 @@ window.AppFormRendererFieldOps = {
                 renderer.formData[field.key] = event.target.value;
                 renderer.handleChange(field, event.target.value, 'change');
             });
-
-            if (field.key === 'url' || field.on_change === 'resolve_url') {
-                el.addEventListener('blur', async (event) => {
-                    const urlValue = event.target.value.trim();
-                    if (!urlValue) {
-                        return;
-                    }
-
-                    const fieldBehaviors = renderer.behaviors[field.key];
-                    const behaviorList = Array.isArray(fieldBehaviors)
-                        ? fieldBehaviors
-                        : (fieldBehaviors ? [fieldBehaviors] : []);
-                    const hasProcessUrlBehavior = behaviorList.some((behavior) =>
-                        (behavior.actions || []).some((action) =>
-                            action.type === 'api_call'
-                            && typeof action.endpoint === 'string'
-                            && action.endpoint.includes('/api/process-url')
-                        )
-                    );
-
-                    if (!hasProcessUrlBehavior) {
-                        await renderer.handleUrlProcess(urlValue);
-                    }
-                });
-            }
         }
 
-        if (el.tagName && field.type !== 'checkbox_group') {
+        // ── Post-processing: id, name, readonly ────────────────────────
+        if (el && el.tagName && field.type !== 'checkbox_group') {
             el.id = field.key;
             el.name = field.key;
         }
 
-        if (field.readonly && el.tagName === 'INPUT') {
+        if (el && field.readonly && el.tagName === 'INPUT') {
             el.readOnly = true;
             el.style.background = '#eee';
         }

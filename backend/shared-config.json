@@ -4,7 +4,7 @@
     "port": 8000
   },
   "app": {
-    "version": "0.18.7"
+    "version": "0.20.0"
   },
   "security": {
     "external_protocols": [
@@ -32,7 +32,7 @@
     "isolated_disabled_templates": [],
     "isolated_rollout_percent": 0,
     "isolated_template_rollout": {},
-    "isolated_fallback_mode": "hybrid",
+    "isolated_fallback_mode": "descriptor",
     "metrics_emit_every_n": 50
   }
 }

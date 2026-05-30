@@ -16,8 +16,6 @@ nul
 *.tmp
 *.old
 *~
-backend/templates/Attack_Defense/
-backend/templates/penetration_test/
 # 忽略系统文件
 .DS_Store
 Thumbs.db
@@ -25,7 +23,6 @@ desktop.ini
 
 # 忽略 IDE 配置
 .vscode/
-.opencode/
 .idea/
 *.swp
 *.swo

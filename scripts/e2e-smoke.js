@@ -68,8 +68,14 @@ async function runSmoke() {
 
     const exportResult = await page.evaluate(async () => {
       try {
-        const single = await window.AppAPI.Templates.export('vuln_report')
-        const batch = await window.AppAPI.Templates.batchExport(['vuln_report', 'intrusion_report'])
+        const templates = await window.AppAPI.Templates.list();
+        const first = templates && templates[0] && templates[0].id;
+        if (!first) {
+          return { ok: false, message: 'No templates available for export test' };
+        }
+        const single = await window.AppAPI.Templates.export(first);
+        const batchIds = templates.slice(0, 2).map(t => t.id);
+        const batch = await window.AppAPI.Templates.batchExport(batchIds);
         return {
           ok: true,
           singleSize: single && single.blob ? single.blob.size : 0,

@@ -348,7 +348,7 @@ behaviors:
       event: change
     actions:
       - type: api_call
-        endpoint: /api/process-url
+        endpoint: "@service/process-url"
         params:
           url: "${url}"
         result_mapping:
@@ -378,7 +378,7 @@ behaviors:
       event: change
     actions:
       - type: api_call
-        endpoint: /api/vulnerability/${vul_name_select}
+        endpoint: "@service/vulnerability-lookup/${vul_name_select}"
         result_mapping:
           Vuln_Name: vul_name
           Vuln_Description: vul_description

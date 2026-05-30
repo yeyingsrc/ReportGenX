@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib
 import inspect
 import multiprocessing
+import os
 import queue
 import sys
 import threading
@@ -506,16 +507,28 @@ class PluginRuntime:
         template_manager: Any,
         config: Optional[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        handler = cls._resolve_registry_handler(template_id, template_manager, config)
+        # Legacy fallback path — all current templates use descriptor mode (PLUGIN dict).
+        # This code is retained as a safety net.
+        # 从 template_manager 推导 template_dir 和 template_info
+        templates_dir = getattr(template_manager, "templates_dir", "")
+        template_dir = os.path.join(templates_dir, template_id) if templates_dir else ""
+        
+        from backend.core.schema_loader import SchemaLoader
+        
+        try:
+            template_info = SchemaLoader.load_schema(template_dir)
+        except Exception as e:
+            logger.warning("Failed to load schema for %s: %s", template_id, e)
+            template_info = template_manager.get_template(template_id)
+            if not template_info:
+                return cls._error_result(f"Template not found: {template_id}")
+        
+        handler = cls._resolve_registry_handler(template_id, template_dir, template_info, config)
 
         if handler is None:
             module = cls._resolve_handler_module(template_id)
-            handler = cls._resolve_module_legacy_handler(
-                module,
-                template_id,
-                template_manager,
-                config,
-            )
+            if module is not None:
+                logger.debug("No registry handler for %s; module found but LEGACY_HANDLER fallback removed.", template_id)
 
         if handler is None:
             return cls._error_result(f"No handler registered for template: {template_id}")
@@ -528,33 +541,10 @@ class PluginRuntime:
             return cls._error_result(f"Legacy execution failed for template: {template_id}: {exc}")
 
     @staticmethod
-    def _resolve_module_legacy_handler(
-        module: Optional[ModuleType],
-        template_id: str,
-        template_manager: Any,
-        config: Optional[Dict[str, Any]],
-    ) -> Optional[Any]:
-        if module is None:
-            return None
-
-        legacy_handler_class = getattr(module, "LEGACY_HANDLER", None)
-        if not inspect.isclass(legacy_handler_class):
-            return None
-
-        try:
-            return legacy_handler_class(template_manager, template_id, config)
-        except Exception as exc:
-            logger.warning(
-                "Failed to construct LEGACY_HANDLER for %s: %s",
-                template_id,
-                exc,
-            )
-            return None
-
-    @staticmethod
     def _resolve_registry_handler(
         template_id: str,
-        template_manager: Any,
+        template_dir: str,
+        template_info: Any,
         config: Optional[Dict[str, Any]],
     ) -> Optional[Any]:
         try:
@@ -563,7 +553,7 @@ class PluginRuntime:
             logger.warning("HandlerRegistry import failed for %s: %s", template_id, exc)
             return None
 
-        return HandlerRegistry.get_handler(template_id, template_manager, config)
+        return HandlerRegistry.get_handler(template_id, template_dir, template_info, config)
 
     @staticmethod
     def _resolve_handler_module(template_id: str) -> Optional[ModuleType]:

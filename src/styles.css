@@ -369,6 +369,8 @@ textarea { resize: vertical; min-height: 100px; line-height: 1.5; }
     transition: opacity 0.3s;
     font-size: 14px;
     pointer-events: auto; /* 允许 Toast 自身交互 */
+    max-width: 500px;
+    word-break: break-all;
 }
 .toast.show {
     opacity: 1;
@@ -1279,6 +1281,10 @@ textarea { resize: vertical; min-height: 100px; line-height: 1.5; }
     align-items: center;
     margin-bottom: 10px;
 }
+/* 
+.manager-header-row > .btn-mini {
+    margin-left: 6px;
+} */
 
 .manager-count-badge {
     font-size: 12px;
@@ -2016,88 +2022,7 @@ textarea { resize: vertical; min-height: 100px; line-height: 1.5; }
 .mb-15 { margin-bottom: 15px; }
 .mb-20 { margin-bottom: 20px; }
 
-/* 动态表单漏洞列表组件样式 (用于 form-renderer 中的漏洞列表字段) */
-.dynamic-vuln-list-container {
-    display: flex;
-    gap: 20px;
-    min-height: 400px;
-}
-
-.dynamic-vuln-sidebar {
-    width: 200px;
-    flex-shrink: 0;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
-    background: #fafafa;
-    padding: 10px;
-}
-
-.dynamic-vuln-sidebar-title {
-    font-weight: bold;
-    padding: 8px;
-    border-bottom: 1px solid #e0e0e0;
-    margin-bottom: 10px;
-}
-
-.dynamic-vuln-sidebar-item {
-    padding: 10px;
-    margin-bottom: 5px;
-    border-radius: 6px;
-    cursor: pointer;
-    border: 1px solid transparent;
-    transition: all 0.2s;
-}
-
-.dynamic-vuln-sidebar-item:hover {
-    background: #f0f0f0;
-}
-
-.dynamic-vuln-sidebar-item.active {
-    background: #e6f7ff;
-    border-color: #1890ff;
-}
-
-.dynamic-vuln-main-content {
-    flex: 1;
-    min-width: 0;
-}
-
-.dynamic-vuln-item-card {
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
-    padding: 20px;
-    background: #fff;
-    display: none;
-}
-
-.dynamic-vuln-item-card.active {
-    display: block;
-}
-
-.dynamic-vuln-card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 15px;
-    padding-bottom: 10px;
-    border-bottom: 1px solid #eee;
-}
-
-.dynamic-vuln-index-badge {
-    background: var(--primary-color, #1890ff);
-    color: white;
-    padding: 4px 12px;
-    border-radius: 4px;
-    font-weight: bold;
-}
-
-.dynamic-vuln-empty-tip {
-    text-align: center;
-    padding: 60px 20px;
-    color: #999;
-    border: 2px dashed #e0e0e0;
-    border-radius: 8px;
-}
+/* 动态表单漏洞列表组件样式 — 已迁移至各模板目录 widgets/style.css */
 
 /* 搜索选择器 */
 .searchable-select-container {
@@ -2284,6 +2209,79 @@ textarea { resize: vertical; min-height: 100px; line-height: 1.5; }
 
 .btn-add-server-type:hover {
     background: #40a9ff;
+}
+
+/* ========== grouped_image_list 容器样式 — 对齐 image_list 视觉风格 ========== */
+.grouped-image-list-container {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.grouped-image-list-container > .btn-add-grouped-image {
+    align-self: flex-start;
+    padding: 8px 18px;
+    background: var(--primary-color);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    margin-top: 4px;
+}
+.grouped-image-list-container > .btn-add-grouped-image:hover {
+    background: #40a9ff;
+}
+.grouped-image-group-item {
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    padding: 12px;
+    background: #fafafa;
+}
+.grouped-image-group-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #eee;
+}
+.grouped-image-select {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    font-size: 13px;
+    background: #fff;
+}
+.grouped-image-text-input {
+    flex: 1;
+    padding: 6px 10px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+    font-size: 13px;
+}
+.btn-paste-screenshot {
+    padding: 4px 10px;
+    font-size: 12px;
+    border: none;
+    border-radius: 4px;
+    background: var(--primary-color);
+    color: #fff;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.btn-paste-screenshot:hover {
+    background: #40a9ff;
+}
+.btn-delete-group {
+    padding: 4px 10px;
+    font-size: 12px;
+    border: 1px solid #ff4d4f;
+    border-radius: 4px;
+    background: #fff;
+    color: #ff4d4f;
+    cursor: pointer;
+    white-space: nowrap;
 }
 
 /* Version mismatch banner */

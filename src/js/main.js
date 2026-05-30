@@ -31,6 +31,29 @@ window.addEventListener('DOMContentLoaded', async () => {
         versionWarningBanner.style.display = 'none';
     }
 
+    async function checkForUpdates() {
+        try {
+            const result = await AppAPI._request('/api/check-update');
+            if (result.has_update) {
+                const banner = document.getElementById('update-banner');
+                if (banner) {
+                    banner.innerHTML = `新版本 <strong>${result.latest_version}</strong> 可用 (当前 ${result.current_version}) — <a href="#" id="update-download-link">查看详情</a>`;
+                    banner.style.display = 'block';
+                    document.getElementById('update-download-link').addEventListener('click', (e) => {
+                        e.preventDefault();
+                        if (window.electronAPI && window.electronAPI.openExternal) {
+                            window.electronAPI.openExternal(result.download_url);
+                        } else {
+                            window.open(result.download_url, '_blank');
+                        }
+                    });
+                }
+            }
+        } catch (e) {
+            // Silently ignore - update check is non-critical
+        }
+    }
+
     async function checkVersionConsistency(configVersion) {
         try {
             const versionInfo = await AppAPI.getVersionInfo();
@@ -79,6 +102,7 @@ window.addEventListener('DOMContentLoaded', async () => {
             if (versionEl) versionEl.innerText = config.version || '';
 
             await checkVersionConsistency(config.version || '');
+            checkForUpdates();  // async, non-blocking
 
             // 同步漏洞列表到 VulnManager
             if (window.AppVulnManager && config.vulnerabilities_list) {

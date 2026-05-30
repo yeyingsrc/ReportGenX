@@ -61,8 +61,14 @@ function syncConfigYaml(version) {
   const versionRegex = /^version:\s*V?[\d.]+/m;
   const newVersion = `version: V${version}`;
 
-  if (!versionRegex.test(configContent)) {
+  const currentMatch = configContent.match(versionRegex);
+  if (!currentMatch) {
     throw new Error('version field not found in backend/config.yaml');
+  }
+
+  // Skip write if version already matches (avoids unnecessary file modification on every start)
+  if (currentMatch[0] === newVersion) {
+    return;
   }
 
   configContent = configContent.replace(versionRegex, newVersion);
@@ -71,6 +77,12 @@ function syncConfigYaml(version) {
 
 function syncSharedConfig(version) {
   const current = readJson(SHARED_CONFIG_JSON, DEFAULT_SHARED_CONFIG);
+
+  // Skip write if version already matches
+  if (current.app && current.app.version === version) {
+    return;
+  }
+
   const next = {
     ...DEFAULT_SHARED_CONFIG,
     ...current,

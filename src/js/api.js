@@ -242,6 +242,37 @@ window.AppAPI = {
         
         async delete(id) {
             return window.AppAPI.deleteVulnerability(id);
+        },
+
+        async importFile(file, overwrite = false) {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('overwrite', overwrite);
+            return window.AppAPI._request('/api/vulnerabilities/import', 'POST', formData);
+        },
+
+        async exportFile() {
+            const resp = await fetch(`${window.AppAPI.BASE_URL}/api/vulnerabilities/export`);
+            if (!resp.ok) throw new Error('Export failed');
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'vulnerabilities.xlsx';
+            a.click();
+            URL.revokeObjectURL(url);
+        },
+
+        async downloadTemplate() {
+            const resp = await fetch(`${window.AppAPI.BASE_URL}/api/vulnerabilities/template`);
+            if (!resp.ok) throw new Error('Download failed');
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'vulnerability_template.xlsx';
+            a.click();
+            URL.revokeObjectURL(url);
         }
     },
 
@@ -359,6 +390,37 @@ window.AppAPI = {
         
         async batchDelete(ids) {
              return window.AppAPI._request('/api/icp-batch-delete', 'POST', { ids });
+        },
+
+        async importFile(file, overwrite = false) {
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('overwrite', overwrite);
+            return window.AppAPI._request('/api/icp-import', 'POST', formData);
+        },
+
+        async downloadTemplate() {
+            const resp = await fetch(`${window.AppAPI.BASE_URL}/api/icp-template`);
+            if (!resp.ok) throw new Error('Download failed');
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'icp_template.xlsx';
+            a.click();
+            URL.revokeObjectURL(url);
+        },
+
+        async exportFile() {
+            const resp = await fetch(`${window.AppAPI.BASE_URL}/api/icp-export`);
+            if (!resp.ok) throw new Error('Export failed');
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'icp_data.xlsx';
+            a.click();
+            URL.revokeObjectURL(url);
         }
     }
 };

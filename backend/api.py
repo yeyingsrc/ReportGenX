@@ -1,13 +1,16 @@
 import base64
+import hashlib
+import io
+import importlib
+import json
 import os
 import re
 import shutil
 import socket
 import sys
+import time
 import uuid
-import io
-import importlib
-import json
+import urllib.request
 import zipfile
 import subprocess
 import traceback
@@ -47,7 +50,6 @@ _LEGACY_CORE_ALIAS_MODULES = (
     "document_editor",
     "document_image_processor",
     "exceptions",
-    "handler_config",
     "handler_registry",
     "handler_utils",
     "logger",
@@ -258,6 +260,14 @@ _ensure_legacy_core_import_aliases(
     fail_on_missing_core=True,
 )
 
+# @service/ endpoint mapping — templates reference shared framework services
+# via "@service/name" in schema.yaml behavior endpoints instead of hardcoding
+# framework API URLs. Add entries here when new shared endpoints are created.
+SERVICE_MAP = {
+    "@service/process-url": "/api/process-url",
+    "@service/vulnerability-lookup": "/api/vulnerability",
+}
+
 # 延迟初始化：提升 macOS 启动速度
 # 这些变量在首次访问时才会加载数据
 _db_reader = None
@@ -312,21 +322,39 @@ def reload_icp_cache():
 
 
 def _assert_template_handler_alignment(template_manager: TemplateManager) -> None:
-    """校验模板与处理器注册一致性，避免运行期出现缺失处理器。"""
+    """校验模板与处理器注册一致性，避免运行期出现缺失处理器。
+
+    支持两种处理器模式：
+    1. HandlerRegistry 注册（旧类继承模式）
+    2. PLUGIN descriptor（新纯函数模式）
+    """
+    import sys
+
     template_ids = set(template_manager.template_ids)
     registered_ids = set(HandlerRegistry.list_registered())
 
     missing_handlers = sorted(template_ids - registered_ids)
+
+    # PLUGIN descriptor 是有效的替代注册方式
+    still_missing = []
+    for tid in missing_handlers:
+        module_name = f"templates.{tid}.handler"
+        module = sys.modules.get(module_name)
+        if module is not None and getattr(module, "PLUGIN", None) is not None:
+            logger.debug(f"Template '{tid}' uses PLUGIN descriptor mode")
+            continue
+        still_missing.append(tid)
+
     extra_handlers = sorted(registered_ids - template_ids)
 
     if extra_handlers:
         logger.warning(f"Detected extra handlers without matching templates: {extra_handlers}")
 
-    if missing_handlers:
-        logger.critical(f"Template handlers missing for templates: {missing_handlers}")
+    if still_missing:
+        logger.critical(f"Template handlers missing for templates: {still_missing}")
         raise RuntimeError(
             "Template handler registry mismatch. "
-            f"Missing handlers for templates: {', '.join(missing_handlers)}"
+            f"Missing handlers for templates: {', '.join(still_missing)}"
         )
 
 
@@ -415,6 +443,18 @@ def _normalize_version_string(raw: Any) -> str:
         return ""
     version = str(raw).strip()
     return version[1:] if version.lower().startswith("v") else version
+
+
+def _is_newer_version(current: str, latest: str) -> bool:
+    """Return True if latest is strictly newer than current (semver comparison)."""
+    if not current or not latest:
+        return False
+    try:
+        cur = [int(x) for x in current.split(".")]
+        lat = [int(x) for x in latest.split(".")]
+    except (ValueError, TypeError):
+        return False
+    return lat > cur
 
 
 def _raise_internal_error(action: str, exc: Exception) -> None:
@@ -642,6 +682,10 @@ if not os.path.exists(TEMP_DIR):
     os.makedirs(TEMP_DIR)
 app.mount("/temp", StaticFiles(directory=TEMP_DIR), name="temp")
 
+SRC_DIR = os.path.join(BASE_DIR, "..", "src")
+if os.path.exists(SRC_DIR):
+    app.mount("/ui", StaticFiles(directory=SRC_DIR, html=True), name="frontend")
+
 
 def _is_subpath(path_to_check: str, base_path: str) -> bool:
     """安全判断：path_to_check 是否位于 base_path 内。"""
@@ -732,6 +776,41 @@ def get_version_info():
         "shared_version": shared_version,
         "is_synced": bool(backend_version and shared_version and backend_version == shared_version),
     }
+
+_update_check_cache = {"last_check": 0, "data": None}
+UPDATE_CHECK_TTL = 3600
+
+@config_router.get("/api/check-update")
+def check_update():
+    """Check for new version on GitHub Releases. Cached for 1 hour."""
+    global _update_check_cache
+    now = time.time()
+    if _update_check_cache["last_check"] and (now - _update_check_cache["last_check"]) < UPDATE_CHECK_TTL:
+        return _update_check_cache["data"]
+
+    current_version = _normalize_version_string(config.get("version", ""))
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/s1g0day/ReportGenX/releases/latest",
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "ReportGenX"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            release = json.loads(resp.read())
+        tag = release.get("tag_name", "")
+        latest_version = _normalize_version_string(tag)
+        result = {
+            "has_update": _is_newer_version(current_version, latest_version),
+            "current_version": current_version,
+            "latest_version": latest_version,
+            "download_url": release.get("html_url", "https://github.com/s1g0day/ReportGenX/releases"),
+            "release_notes": release.get("body", ""),
+            "error": None,
+        }
+    except Exception as e:
+        result = {"has_update": False, "current_version": current_version, "latest_version": "", "download_url": "", "release_notes": "", "error": str(e)}
+
+    _update_check_cache = {"last_check": now, "data": result}
+    return result
 
 
 @config_router.get("/api/plugin-runtime-config")
@@ -1109,7 +1188,7 @@ def delete_report(req: DeleteFileRequest):
 @icp_router.get("/api/icp-columns")
 def get_icp_columns():
     """获取 ICP 表的所有字段名"""
-    return get_db_reader().get_table_columns("icp_info_Sheet1")
+    return get_db_reader().get_table_columns("icp_info")
 
 @icp_router.get("/api/icp-list")
 def list_icp_entries(db: DbReaderDep):
@@ -1145,6 +1224,326 @@ def batch_delete_icp(req: BatchDeleteRequest, db: DbReaderDep):
     success, msg = db.batch_delete_icp(req.ids)
     return handle_db_result(success, msg)
 
+@icp_router.post("/api/icp-import")
+async def import_icp(file: UploadFile = File(...), overwrite: bool = Form(default=False)):
+    """Import ICP entries from Excel (.xlsx/.xls). Uses single-connection transaction."""
+    import openpyxl
+    import sqlite3
+    from io import BytesIO
+
+    CH_TO_EN = {
+        'domain': 'domain', '域名': 'domain',
+        'unitName': 'unitName', '单位名称': 'unitName',
+        'natureName': 'natureName', '单位性质': 'natureName', '性质': 'natureName',
+        'mainLicence': 'mainLicence', '备案号': 'mainLicence', 'ICP备案号': 'mainLicence',
+        'serviceLicence': 'serviceLicence', '许可证号': 'serviceLicence', 'ICP许可证号': 'serviceLicence',
+        'updateRecordTime': 'updateRecordTime', '更新时间': 'updateRecordTime',
+    }
+
+    try:
+        contents = await file.read()
+        wb = openpyxl.load_workbook(BytesIO(contents), read_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            return {"success": False, "error": "Empty file"}
+
+        headers = [str(h).strip() if h else '' for h in rows[0]]
+        column_map = {}
+        for i, h in enumerate(headers):
+            en = CH_TO_EN.get(h, h)
+            if en and en not in column_map:
+                column_map[i] = en
+
+        if 'domain' not in column_map.values():
+            return {"success": False, "error": "Excel must have a 'domain' (域名) column"}
+
+        db = get_db_reader()
+        db_path = db.db_path
+        conn = sqlite3.connect(db_path)
+        db._ensure_column_exists(conn, "icp_info", "Vuln_id")
+        cursor = conn.cursor()
+        imported = 0
+        skipped = 0
+        errors = []
+
+        ICP_FIELDS = ['Vuln_id', 'unitName', 'natureName', 'domain', 'mainLicence', 'serviceLicence', 'updateRecordTime']
+
+        try:
+            conn.execute("BEGIN")
+            for row_idx, row in enumerate(rows[1:], start=2):
+                entry = {}
+                for col_idx, en_name in column_map.items():
+                    val = row[col_idx] if col_idx < len(row) else ''
+                    entry[en_name] = str(val).strip() if val else ''
+
+                domain = entry.get('domain', '')
+                if not domain:
+                    errors.append(f"Row {row_idx}: missing domain, skipped")
+                    skipped += 1
+                    continue
+
+                vuln_id = hashlib.sha256(domain.encode()).hexdigest()[:16]
+
+                cursor.execute("SELECT 1 FROM icp_info WHERE Vuln_id = ?", (vuln_id,))
+                exists = cursor.fetchone() is not None
+
+                if exists:
+                    if overwrite:
+                        updates = ', '.join([f"{f}=?" for f in ICP_FIELDS if f != 'Vuln_id'])
+                        vals = [entry.get(f, '') for f in ICP_FIELDS if f != 'Vuln_id'] + [vuln_id]
+                        cursor.execute(f"UPDATE icp_info SET {updates} WHERE Vuln_id=?", vals)
+                        imported += 1
+                    else:
+                        skipped += 1
+                else:
+                    placeholders = ','.join(['?'] * len(ICP_FIELDS))
+                    col_str = ','.join(ICP_FIELDS)
+                    vals = [vuln_id] + [entry.get(f, '') for f in ICP_FIELDS if f != 'Vuln_id']
+                    cursor.execute(f"INSERT INTO icp_info ({col_str}) VALUES ({placeholders})", vals)
+                    imported += 1
+
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        reload_icp_cache()
+        return {"success": True, "imported": imported, "skipped": skipped, "errors": errors}
+    except Exception as e:
+        logger.error(f"ICP import failed: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@vuln_router.post("/api/vulnerabilities/import")
+async def import_vulnerabilities(file: UploadFile = File(...), overwrite: bool = Form(default=False)):
+    """Import vulnerabilities from Excel (.xlsx/.xls). Single-connection transaction."""
+    import openpyxl
+    import sqlite3
+    from io import BytesIO
+
+    CH_TO_EN = {
+        'name': 'name', '漏洞名称': 'name',
+        'category': 'category', '漏洞分类': 'category',
+        'port': 'port', '默认端口': 'port',
+        'level': 'level', '风险级别': 'level',
+        'basis': 'basis', '定级依据': 'basis',
+        'description': 'description', '漏洞描述': 'description',
+        'impact': 'impact', '漏洞危害': 'impact',
+        'suggestion': 'suggestion', '加固建议': 'suggestion', '修复建议': 'suggestion',
+    }
+
+    try:
+        contents = await file.read()
+        wb = openpyxl.load_workbook(BytesIO(contents), read_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            return {"success": False, "error": "Empty file"}
+
+        headers = [str(h).strip() if h else '' for h in rows[0]]
+        column_map = {}
+        for i, h in enumerate(headers):
+            en = CH_TO_EN.get(h, h)
+            if en and en not in column_map:
+                column_map[i] = en
+
+        if 'name' not in column_map.values():
+            return {"success": False, "error": "Excel must have a 'name' (漏洞名称) column"}
+
+        db = get_db_reader()
+        db_path = db.db_path
+        conn = sqlite3.connect(db_path)
+        db._ensure_column_exists(conn, "vulnerabilities", "Vuln_id")
+        db._ensure_column_exists(conn, "vulnerabilities", "Class_basis")
+        db._ensure_column_exists(conn, "vulnerabilities", "Vuln_Hazards")
+        cursor = conn.cursor()
+        imported = 0
+        skipped = 0
+        errors = []
+
+        VULN_FIELDS = ['Vuln_id', 'Vuln_Name', 'Vuln_Class', 'Default_port',
+                       'Risk_Level', 'Class_basis', 'Vuln_Description',
+                       'Vuln_Hazards', 'Repair_suggestions']
+        FIELD_MAP = {
+            'name': 'Vuln_Name', 'category': 'Vuln_Class', 'port': 'Default_port',
+            'level': 'Risk_Level', 'basis': 'Class_basis', 'description': 'Vuln_Description',
+            'impact': 'Vuln_Hazards', 'suggestion': 'Repair_suggestions',
+        }
+
+        try:
+            conn.execute("BEGIN")
+            for row_idx, row in enumerate(rows[1:], start=2):
+                entry = {}
+                for col_idx, en_name in column_map.items():
+                    val = row[col_idx] if col_idx < len(row) else ''
+                    entry[en_name] = str(val).strip() if val else ''
+
+                name = entry.get('name', '')
+                if not name:
+                    errors.append(f"Row {row_idx}: missing name, skipped")
+                    skipped += 1
+                    continue
+
+                vuln_id = hashlib.md5(name.encode('utf-8')).hexdigest()
+
+                cursor.execute("SELECT 1 FROM vulnerabilities WHERE Vuln_id = ?", (vuln_id,))
+                exists = cursor.fetchone() is not None
+
+                if exists:
+                    if overwrite:
+                        sets = []
+                        vals = []
+                        for en_key, db_col in FIELD_MAP.items():
+                            sets.append(f"{db_col}=?")
+                            vals.append(entry.get(en_key, ''))
+                        vals.append(vuln_id)
+                        cursor.execute(f"UPDATE vulnerabilities SET {', '.join(sets)} WHERE Vuln_id=?", vals)
+                        imported += 1
+                    else:
+                        skipped += 1
+                else:
+                    col_str = ','.join(VULN_FIELDS)
+                    placeholders = ','.join(['?'] * len(VULN_FIELDS))
+                    vals = [vuln_id, name, entry.get('category', ''), entry.get('port', ''),
+                            entry.get('level', ''), entry.get('basis', ''), entry.get('description', ''),
+                            entry.get('impact', ''), entry.get('suggestion', '')]
+                    cursor.execute(f"INSERT INTO vulnerabilities ({col_str}) VALUES ({placeholders})", vals)
+                    imported += 1
+
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        reload_vulnerabilities_cache()
+        return {"success": True, "imported": imported, "skipped": skipped, "errors": errors}
+    except Exception as e:
+        logger.error(f"Vulnerability import failed: {e}")
+        return {"success": False, "error": str(e)}
+
+@vuln_router.get("/api/vulnerabilities/template")
+def download_vuln_template():
+    """Download vulnerability import Excel template."""
+    import openpyxl
+    from io import BytesIO
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Vuln Template"
+
+    headers = ['漏洞名称', '漏洞分类', '默认端口', '风险级别', '定级依据', '漏洞描述', '漏洞危害', '修复建议']
+    for col, h in enumerate(headers, 1):
+        ws.cell(row=1, column=col, value=h)
+
+    ws.cell(row=2, column=1, value='SQL注入漏洞')
+    ws.cell(row=2, column=2, value='Web安全')
+    ws.cell(row=2, column=3, value='80')
+    ws.cell(row=2, column=4, value='高危')
+    ws.cell(row=2, column=5, value='OWASP Top 10')
+    ws.cell(row=2, column=6, value='可对数据库进行非法操作')
+    ws.cell(row=2, column=7, value='导致数据泄露')
+    ws.cell(row=2, column=8, value='使用参数化查询')
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=vulnerability_template.xlsx"},
+    )
+
+@vuln_router.get("/api/vulnerabilities/export")
+def export_vulnerabilities():
+    """Export vulnerabilities to Excel."""
+    import openpyxl
+    from io import BytesIO
+
+    _, vulns = get_cached_vulnerabilities()
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Vulnerabilities"
+
+    headers = ['漏洞名称', '漏洞分类', '默认端口', '风险级别', '定级依据', '漏洞描述', '漏洞危害', '修复建议']
+    for col, h in enumerate(headers, 1):
+        ws.cell(row=1, column=col, value=h)
+
+    db_keys = ['Vuln_Name', 'Vuln_Class', 'Default_port', 'Risk_Level',
+               'Class_basis', 'Vuln_Description', 'Vuln_Hazards', 'Repair_suggestions']
+    for row_idx, (_, v) in enumerate(vulns.items(), start=2):
+        for col_idx, key in enumerate(db_keys, 1):
+            ws.cell(row=row_idx, column=col_idx, value=v.get(key, '') or '')
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=vulnerabilities.xlsx"},
+    )
+
+@icp_router.get("/api/icp-export")
+def export_icp_entries():
+    """Export ICP entries to Excel."""
+    import openpyxl
+    from io import BytesIO
+
+    icp_list = get_db_reader().read_icp_raw_list()
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "ICP Data"
+
+    headers = ['domain', 'unitName', 'natureName', 'mainLicence', 'serviceLicence', 'updateRecordTime']
+    for col, h in enumerate(headers, 1):
+        ws.cell(row=1, column=col, value=h)
+
+    for row_idx, entry in enumerate(icp_list, start=2):
+        for col_idx, key in enumerate(headers, 1):
+            ws.cell(row=row_idx, column=col_idx, value=entry.get(key, '') or '')
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=icp_data.xlsx"},
+    )
+def download_icp_template():
+    """Download ICP import Excel template."""
+    import openpyxl
+    from io import BytesIO
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "ICP Template"
+
+    headers = ['domain', 'unitName', 'natureName', 'mainLicence', 'serviceLicence', 'updateRecordTime']
+    for col, h in enumerate(headers, 1):
+        ws.cell(row=1, column=col, value=h)
+
+    ws.cell(row=2, column=1, value='example.com')
+    ws.cell(row=2, column=2, value='示例公司')
+    ws.cell(row=2, column=3, value='企业')
+    ws.cell(row=2, column=4, value='京ICP备12345678号')
+    ws.cell(row=2, column=5, value='京ICP证123456号')
+    ws.cell(row=2, column=6, value='2026-01-01')
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=icp_template.xlsx"},
+    )
+
 @config_router.post("/api/update-config")
 def update_config(req: UpdateConfigRequest):
     """更新配置文件中的 supplierName"""
@@ -1172,6 +1571,19 @@ def update_config(req: UpdateConfigRequest):
 
 
 # ========== 模板相关 API ==========
+
+@app.get("/api/services")
+def get_service_map():
+    """Expose @service/ → URL mapping for frontend behavior endpoint resolution.
+
+    Templates use '@service/name' prefixes in schema.yaml behavior endpoints
+    instead of hardcoding framework API URLs. This endpoint provides the mapping
+    so the frontend form-renderer can resolve them at runtime.
+    """
+    return {
+        "success": True,
+        "services": SERVICE_MAP,
+    }
 
 @app.get("/api/templates")
 def get_templates(include_details: bool = False):
@@ -1227,6 +1639,16 @@ def get_template_data_sources(template_id: str):
         raise HTTPException(status_code=404, detail=f"Template not found: {template_id}")
     
     return resolved
+
+@app.get("/api/templates/{template_id}/widgets/{filename}")
+def get_template_widget(template_id: str, filename: str):
+    """Serve template widget files (JS / CSS)."""
+    widget_path = os.path.join(TEMPLATES_DIR, template_id, "widgets", filename)
+    if ".." in filename or not os.path.exists(widget_path):
+        raise HTTPException(status_code=404, detail="Widget not found")
+    ext = os.path.splitext(filename)[1].lower()
+    media_map = {".js": "application/javascript", ".css": "text/css"}
+    return FileResponse(path=widget_path, media_type=media_map.get(ext, "application/octet-stream"))
 
 @app.post("/api/templates/{template_id}/validate")
 def validate_template_data(template_id: str, data: dict[str, Any]):
@@ -1693,8 +2115,15 @@ async def batch_import_templates(files: list[UploadFile] = File(...), overwrite:
 @app.delete("/api/templates/{template_id}")
 def delete_template(template_id: str, backup: bool = True):
     """删除模板"""
-    # 保护默认模板不被删除
-    protected_templates = ['vuln_report']
+    # 保护默认模板不被删除 —— 由各模板 runtime.yaml 中的 protected 字段驱动
+    protected_templates = []
+    for tid in get_template_manager().template_ids:
+        runtime_path = os.path.join(TEMPLATES_DIR, tid, "runtime.yaml")
+        if os.path.exists(runtime_path):
+            with open(runtime_path, 'r', encoding='utf-8') as f:
+                runtime_config = yaml.safe_load(f) or {}
+                if runtime_config.get('protected'):
+                    protected_templates.append(tid)
     if template_id in protected_templates:
         raise HTTPException(status_code=403, detail=f"Cannot delete protected template: {template_id}")
     

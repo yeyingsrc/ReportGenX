@@ -1,6 +1,6 @@
 {
   "name": "report-electron-app",
-  "version": "0.18.7",
+  "version": "0.20.0",
   "description": "Electron version of ReportGenX",
   "repository": {
     "type": "git",
@@ -12,8 +12,7 @@
     "sync-version": "node scripts/sync-version.js",
     "check-version": "node scripts/check-version-sync.js",
     "test:e2e:smoke": "node scripts/e2e-smoke.js",
-    "test:backend": "python -m unittest discover -s backend/tests -p \"test_*.py\"",
-    "test": "npm run test:backend",
+    "test": "echo No tests configured. Backend unit tests were removed — see commit 40fa4a5 for history.",
     "prestart": "npm run sync-version",
     "predist": "npm run sync-version && npm run check-version",
     "dist": "electron-builder",
@@ -98,7 +97,6 @@
       "sign": false,
       "artifactName": "${productName}-mac-${version}-${arch}-unsigned.${ext}"
     }
-
   },
   "keywords": [],
   "author": {
@@ -110,5 +108,8 @@
     "electron": "^39.5.1",
     "electron-builder": "^26.4.0",
     "playwright": "^1.58.2"
+  },
+  "dependencies": {
+    "electron-log": "^5.4.4"
   }
 }

@@ -28,7 +28,7 @@ class DbDataReader:
             conn.text_factory = str  # 确保文本以字符串形式返回
             cursor = conn.cursor()
             
-            query = "SELECT * FROM icp_info_Sheet1"
+            query = "SELECT * FROM icp_info"
             cursor.execute(query)
             rows = cursor.fetchall()
             conn.close()
@@ -76,7 +76,7 @@ class DbDataReader:
             cursor = conn.cursor()
             
             # 尝试获取 Vuln_id 列，如果不存在则只会获取其他列
-            query = "SELECT * FROM vulnerabilities_Sheet1"
+            query = "SELECT * FROM vulnerabilities"
             cursor.execute(query)
             rows = cursor.fetchall()
             conn.close()
@@ -223,9 +223,9 @@ class DbDataReader:
             conn = sqlite3.connect(self.db_path)
             
             # --- Schema Migration: Ensure all required columns exist ---
-            self._ensure_column_exists(conn, "vulnerabilities_Sheet1", "Vuln_id")
-            self._ensure_column_exists(conn, "vulnerabilities_Sheet1", "Class_basis")
-            self._ensure_column_exists(conn, "vulnerabilities_Sheet1", "Vuln_Hazards")
+            self._ensure_column_exists(conn, "vulnerabilities", "Vuln_id")
+            self._ensure_column_exists(conn, "vulnerabilities", "Class_basis")
+            self._ensure_column_exists(conn, "vulnerabilities", "Vuln_Hazards")
             
             cursor = conn.cursor()
             
@@ -236,7 +236,7 @@ class DbDataReader:
 
             # Check duplication (English Key Only)
             cursor.execute(
-                "SELECT count(*) FROM vulnerabilities_Sheet1 WHERE Vuln_Name=?", 
+                "SELECT count(*) FROM vulnerabilities WHERE Vuln_Name=?", 
                 (name,)
             )
             if cursor.fetchone()[0] > 0:
@@ -266,7 +266,7 @@ class DbDataReader:
             placeholders = ','.join(['?'] * len(fields))
             col_str = ','.join(fields)
             
-            final_sql = f"INSERT INTO vulnerabilities_Sheet1 ({col_str}) VALUES ({placeholders})"
+            final_sql = f"INSERT INTO vulnerabilities ({col_str}) VALUES ({placeholders})"
             cursor.execute(final_sql, values)
             
             conn.commit()
@@ -281,9 +281,9 @@ class DbDataReader:
             conn = sqlite3.connect(self.db_path)
             
             # --- Schema Migration ---
-            self._ensure_column_exists(conn, "vulnerabilities_Sheet1", "Vuln_id")
-            self._ensure_column_exists(conn, "vulnerabilities_Sheet1", "Class_basis")
-            self._ensure_column_exists(conn, "vulnerabilities_Sheet1", "Vuln_Hazards")
+            self._ensure_column_exists(conn, "vulnerabilities", "Vuln_id")
+            self._ensure_column_exists(conn, "vulnerabilities", "Class_basis")
+            self._ensure_column_exists(conn, "vulnerabilities", "Vuln_Hazards")
             
             cursor = conn.cursor()
             
@@ -312,7 +312,7 @@ class DbDataReader:
                 return False, "没有可更新的字段"
 
             values.append(vuln_id)
-            sql = f"UPDATE vulnerabilities_Sheet1 SET {', '.join(updates)} WHERE Vuln_id=?"
+            sql = f"UPDATE vulnerabilities SET {', '.join(updates)} WHERE Vuln_id=?"
             
             cursor.execute(sql, tuple(values))
             
@@ -331,10 +331,10 @@ class DbDataReader:
             conn = sqlite3.connect(self.db_path)
             
             # --- Schema Migration ---
-            self._ensure_column_exists(conn, "vulnerabilities_Sheet1", "Vuln_id")
+            self._ensure_column_exists(conn, "vulnerabilities", "Vuln_id")
             
             cursor = conn.cursor()
-            cursor.execute("DELETE FROM vulnerabilities_Sheet1 WHERE Vuln_id=?", (vuln_id,))
+            cursor.execute("DELETE FROM vulnerabilities WHERE Vuln_id=?", (vuln_id,))
             if cursor.rowcount == 0:
                 # Fallback: legacy delete by name? No, risky. 
                 pass
@@ -368,7 +368,7 @@ class DbDataReader:
             conn = sqlite3.connect(self.db_path)
             conn.row_factory = sqlite3.Row # Allow dict-like access
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM icp_info_Sheet1")
+            cursor.execute("SELECT * FROM icp_info")
             rows = cursor.fetchall()
             
             result = []
@@ -386,7 +386,7 @@ class DbDataReader:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            cursor.execute("DELETE FROM icp_info_Sheet1 WHERE Vuln_id = ?", (vuln_id,))
+            cursor.execute("DELETE FROM icp_info WHERE Vuln_id = ?", (vuln_id,))
             rows_affected = cursor.rowcount
             
             conn.commit()
@@ -403,17 +403,13 @@ class DbDataReader:
         """添加 ICP 备案信息"""
         try:
             conn = sqlite3.connect(self.db_path)
-            # Ensure Vuln_id exists (migrating implicitly if needed)
-            self._ensure_column_exists(conn, "icp_info_Sheet1", "Vuln_id")
-            
+            self._ensure_column_exists(conn, "icp_info", "Vuln_id")
+
             cursor = conn.cursor()
-            
-            # Generate ID
+
             import uuid
-            vuln_id = str(uuid.uuid4())
-            
-            # Fields based on observation: 
-            # unitName (性质), natureName (单位名称), domain, mainLicence, serviceLicence, updateRecordTime
+            vuln_id = data.get('Vuln_id') if data.get('Vuln_id') else str(uuid.uuid4())
+
             fields = ['Vuln_id', 'unitName', 'natureName', 'domain', 'mainLicence', 'serviceLicence', 'updateRecordTime']
             
             values = [
@@ -429,7 +425,7 @@ class DbDataReader:
             placeholders = ','.join(['?'] * len(fields))
             col_str = ','.join(fields)
             
-            sql = f"INSERT INTO icp_info_Sheet1 ({col_str}) VALUES ({placeholders})"
+            sql = f"INSERT INTO icp_info ({col_str}) VALUES ({placeholders})"
             cursor.execute(sql, values)
             conn.commit()
             conn.close()
@@ -465,7 +461,7 @@ class DbDataReader:
                 return False, "没有可更新的字段"
 
             values.append(vuln_id)
-            sql = f"UPDATE icp_info_Sheet1 SET {', '.join(updates)} WHERE Vuln_id=?"
+            sql = f"UPDATE icp_info SET {', '.join(updates)} WHERE Vuln_id=?"
             
             cursor.execute(sql, tuple(values))
             affected = cursor.rowcount
@@ -479,6 +475,20 @@ class DbDataReader:
         except Exception as e:
             return False, f"更新失败: {str(e)}"
 
+    def lookup_icp_by_id(self, vuln_id):
+        """Look up an ICP entry by Vuln_id, returns dict or None."""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM icp_info WHERE Vuln_id = ?", (vuln_id,))
+            row = cursor.fetchone()
+            conn.close()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Error looking up ICP by id {vuln_id}: {e}")
+            return None
+
     def batch_delete_icp(self, id_list):
         """批量删除 ICP 信息"""
         try:
@@ -489,7 +499,7 @@ class DbDataReader:
                 return True, "未选择记录"
                 
             placeholders = ','.join(['?'] * len(id_list))
-            sql = f"DELETE FROM icp_info_Sheet1 WHERE Vuln_id IN ({placeholders})"
+            sql = f"DELETE FROM icp_info WHERE Vuln_id IN ({placeholders})"
             
             cursor.execute(sql, id_list)
             conn.commit()

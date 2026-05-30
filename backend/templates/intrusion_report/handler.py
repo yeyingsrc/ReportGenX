@@ -1,225 +1,171 @@
 # -*- coding: utf-8 -*-
 """
 @Createtime: 2026-01-26
-@Description: 入侵痕迹报告模板处理器
-使用Template Method模式消除重复的处理器方法
+@Updatetime: 2026-05-29
+@description: 入侵痕迹报告处理器 - pure function interface with GenerationContext injection.
+
+Template exposes:
+    preprocess(data, config) -> dict
+    validate(data, config, template_info) -> (bool, list)
+    generate(data, ctx) -> (bool, str, str)
+
+No class inheritance. All SDK services accessed via ctx (GenerationContext).
 """
 
 import os
-from typing import Dict, Any, Optional
+from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
 
-from core.handler_utils import BaseTemplateHandlerEnhanced, ErrorHandler
-from core.base_handler import register_handler
-from core.logger import setup_logger
-
-# 初始化日志记录器
-logger = setup_logger('IntrusionHandler')
+from core import gen_report_id, set_default_dates, set_supplier_defaults
 
 
-# 严重等级映射
+# ═══════════════════════════════════════════════════════════════════
+# Constants
+# ═══════════════════════════════════════════════════════════════════
+
 SEVERITY_LEVEL_MAP = {
-    'critical': '严重',
-    'high': '高危',
-    'medium': '中危',
-    'low': '低危',
-    '严重': '严重',
-    '高危': '高危',
-    '中危': '中危',
-    '低危': '低危'
+    'critical': '严重', 'high': '高危', 'medium': '中危', 'low': '低危',
+    '严重': '严重', '高危': '高危', '中危': '中危', '低危': '低危',
 }
 
-# 入侵类型映射
 INTRUSION_TYPE_MAP = {
-    'webshell': 'Webshell植入',
-    'backdoor': '后门程序',
-    'malware': '恶意软件',
-    'data_theft': '数据窃取',
-    'privilege_escalation': '权限提升',
-    'lateral_movement': '横向移动',
-    'crypto_mining': '挖矿木马',
-    'ransomware': '勒索软件',
-    'other': '其他'
+    'webshell': 'Webshell植入', 'backdoor': '后门程序', 'malware': '恶意软件',
+    'data_theft': '数据窃取', 'privilege_escalation': '权限提升',
+    'lateral_movement': '横向移动', 'crypto_mining': '挖矿木马',
+    'ransomware': '勒索软件', 'other': '其他',
 }
 
+# ═══════════════════════════════════════════════════════════════════
+# Pure functions — template business logic
+# ═══════════════════════════════════════════════════════════════════
 
-@register_handler("intrusion_report")
-class IntrusionReportHandler(BaseTemplateHandlerEnhanced):
-    """入侵痕迹报告处理器
-    
-    使用Template Method模式，自动继承日志和数据库记录方法。
+def preprocess(data: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
     """
-    
-    # 定义处理器类型 - 自动从配置中获取日志字段、前缀、数据库表等
-    HANDLER_TYPE = 'intrusion_report'
-    
-    def __init__(
-        self,
-        template_manager: Any,
-        template_id: str,
-        config: Optional[Dict[str, Any]] = None,
-    ):
-        super().__init__(template_manager, template_id, config)
-    
-    def preprocess(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """预处理数据"""
-        processed = data.copy()
-        
-        # 自动生成报告编号
-        if not processed.get('report_id'):
-            processed['report_id'] = self.generate_report_id(prefix="IR", use_sequence=False)
-        
-        # 转换入侵类型显示值
-        intrusion_type = processed.get('intrusion_type', '')
-        if intrusion_type in INTRUSION_TYPE_MAP:
-            processed['intrusion_type_display'] = INTRUSION_TYPE_MAP[intrusion_type]
-        else:
-            processed['intrusion_type_display'] = intrusion_type
-        
-        # 转换严重等级
-        severity = processed.get('severity_level', '')
-        if severity in SEVERITY_LEVEL_MAP:
-            processed['severity_level'] = SEVERITY_LEVEL_MAP[severity]
-        
-        # 处理攻击手法：优先使用自定义输入，否则从漏洞库获取
-        attack_method_custom = processed.get('attack_method_custom', '').strip()
-        attack_method_id = processed.get('attack_method', '')
-        
-        if attack_method_custom:
-            # 用户输入了自定义攻击手法
-            processed['attack_method_display'] = attack_method_custom
-        elif attack_method_id:
-            # 从漏洞库中获取漏洞名称
-            vuln_name = self._get_vulnerability_name(attack_method_id)
-            processed['attack_method_display'] = vuln_name if vuln_name else attack_method_id
-        else:
-            processed['attack_method_display'] = ''
-        
-        # 设置默认日期（使用基类辅助方法）
-        self._set_default_dates(processed, ['discovery_time', 'report_time'])
-        
-        # 设置分析人员（使用基类辅助方法）
-        self._set_supplier_defaults(processed, ['analyst_name'])
-        
-        return processed
-    
-    def _get_vulnerability_name(self, vuln_id: str) -> str:
-        """
-        从漏洞库获取漏洞名称
-        
-        Args:
-            vuln_id: 漏洞ID
-            
-        Returns:
-            漏洞名称，如果未找到则返回空字符串
-        """
-        try:
-            # 导入数据库读取器
-            from core.data_reader_db import DbDataReader
-            
-            # 获取数据库路径
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-            db_path = os.path.join(base_dir, self.config.get("vul_or_icp", "data/combined.db"))
-            
-            # 读取漏洞数据
-            db_reader = DbDataReader(db_path, "", "")
-            vuln_list, vulnerabilities = db_reader.read_vulnerabilities_from_db()
-            
-            # 查找漏洞名称
-            if vuln_id in vulnerabilities:
-                return vulnerabilities[vuln_id].get('Vuln_Name', '')
-            
-            # 如果ID未找到，尝试在列表中查找
-            for vuln in vuln_list:
-                if vuln.get('id') == vuln_id:
-                    return vuln.get('name', '')
-            
-            return ''
-        except Exception as e:
-            logger.error(f"Failed to get vulnerability name: {e}")
-            return ''
-    
-    def generate(self, data: Dict[str, Any], output_dir: str) -> tuple[bool, str, str]:
-        """
-        生成入侵痕迹报告
-        
-        Args:
-            data: 预处理后的报告数据
-            output_dir: 输出目录路径
-            
-        Returns:
-            (成功标志, 输出文件路径, 消息)
-        """
-        from docx import Document
-        from core.document_editor import DocumentEditor
-        from core.document_image_processor import DocumentImageProcessor
-        
-        self.output_dir = output_dir
-        
-        try:
-            # 获取模板文件路径
-            template_file = self.template_manager.get_template_file_path(self.template_id)
-            
-            # 如果没有模板文件，创建简单文档
-            if not template_file or not os.path.exists(template_file):
-                return self.generate_fallback_report(data, output_dir)
-            
-            # 构建替换字典
-            extra_replacements = {
-                '#intrusion_type#': data.get('intrusion_type_display', ''),
-                '#attack_method#': data.get('attack_method_display', ''),
-                '#supplierName#': data.get('supplier_name') or self.config.get('supplierName', ''),
-                '#reportTime#': self.get_current_date()
-            }
-            replacements = self.build_replacements(data, extra_replacements)
-            
-            # 加载并编辑文档
-            doc = Document(template_file)
-            editor = DocumentEditor(doc)
-            
-            # 执行文本替换
-            editor.replace_report_text(replacements)
-            
-            # 处理证据图片
-            evidence_images = data.get('evidence_images', [])
-            log_evidence_images = data.get('log_evidence', [])
+    Data preprocessing.
 
-            img_processor = DocumentImageProcessor(doc, [])
-            # 无论是否有图片，都需要处理占位符（有图片则替换，无图片则移除占位符）
-            img_processor.replace_placeholder_with_images('#evidence_images#', evidence_images)
-            img_processor.replace_placeholder_with_images('#log_evidence#', log_evidence_images)
-            
-            # 生成输出文件路径
-            output_path = self._generate_output_path(data)
-            
-            # 保存文档（使用基类方法，自动处理文件名冲突）
-            final_path = self.save_document(doc, output_path)
-            
-            return True, final_path, "入侵痕迹报告生成成功"
-            
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return False, "", f"报告生成失败: {str(e)}"
-    
-    def _generate_output_path(self, data: Dict[str, Any]) -> str:
-        """生成输出文件路径"""
-        unit_name = data.get('unit_name', 'Unknown')
-        filename = self._build_output_filename(data)
-        return self.build_output_path(self.output_dir, unit_name, filename)
-    
-    def _build_output_filename(self, data: Dict[str, Any]) -> str:
-        """构建输出文件名"""
+    1. Generate report ID
+    2. Convert intrusion type display value
+    3. Convert severity level
+    4. Resolve attack method (custom input or vuln lookup)
+    5. Set default dates
+    6. Set supplier / analyst defaults
+    """
+    processed = data.copy()
+
+    # 1. Generate report ID
+    if not processed.get('report_id'):
+        processed['report_id'] = gen_report_id(prefix="IR", use_sequence=False)
+
+    # 2. Convert intrusion type
+    intrusion_type = processed.get('intrusion_type', '')
+    processed['intrusion_type_display'] = INTRUSION_TYPE_MAP.get(intrusion_type, intrusion_type)
+
+    # 3. Convert severity level
+    severity = processed.get('severity_level', '')
+    processed['severity_level'] = SEVERITY_LEVEL_MAP.get(severity, severity)
+
+    # 4. Resolve attack method
+    attack_method_custom = processed.get('attack_method_custom', '').strip()
+    attack_method_id = processed.get('attack_method', '')
+    if attack_method_custom:
+        processed['attack_method_display'] = attack_method_custom
+    elif attack_method_id:
+        # Resolved by the execute() adapter via ctx before preprocess is called;
+        # fall back to the raw id if not pre-resolved.
+        processed['attack_method_display'] = processed.get('attack_method_display', attack_method_id)
+    else:
+        processed['attack_method_display'] = ''
+
+    # 5. Set default dates
+    set_default_dates(processed, ['discovery_time', 'report_time'])
+
+    # 6. Set analyst defaults
+    set_supplier_defaults(processed, config, ['analyst_name'])
+
+    return processed
+
+
+def validate(
+    data: Dict[str, Any],
+    config: Dict[str, Any],
+    template_info: Any,
+) -> Tuple[bool, List[str]]:
+    """Data validation using template field definitions."""
+    errors = []
+
+    if template_info:
+        for field_def in template_info.fields:
+            if field_def.required:
+                value = data.get(field_def.key, "")
+                if not value or (isinstance(value, str) and not value.strip()):
+                    errors.append(f"Field '{field_def.label}' is required")
+
+        for rule in template_info.validation_rules:
+            if rule.rule == 'required':
+                for field_key in rule.fields:
+                    value = data.get(field_key, "")
+                    if not value or (isinstance(value, str) and not value.strip()):
+                        errors.append(rule.message)
+                        break
+
+    return len(errors) == 0, errors
+
+
+def generate(data: Dict[str, Any], ctx: Any) -> Tuple[bool, str, str]:
+    """
+    Generate intrusion report.
+
+    Args:
+        data: Preprocessed form data
+        ctx: GenerationContext providing all framework services
+
+    Returns:
+        (success, output_path, message)
+    """
+    try:
+        # 1. Load document (falls back to generate_fallback if template missing)
+        doc = ctx.load_document()
+        if not doc:
+            return ctx.generate_fallback(data)
+
+        # 2. Build replacements
+        extra_replacements = {
+            '#intrusion_type#': data.get('intrusion_type_display', ''),
+            '#attack_method#': data.get('attack_method_display', ''),
+            '#supplierName#': data.get('supplier_name') or ctx.config.get('supplierName', ''),
+            '#reportTime#': datetime.now().strftime("%Y-%m-%d"),
+        }
+        replacements = ctx.build_replacements(data, extra_replacements)
+
+        # 3. Replace text
+        ctx.replace_text(replacements)
+
+        # 4. Process evidence images
+        evidence_images = data.get('evidence_images', [])
+        log_evidence_images = data.get('log_evidence', [])
+        ctx.process_image_list('#evidence_images#', evidence_images)
+        ctx.process_image_list('#log_evidence#', log_evidence_images)
+
+        # 5. Save report
         unit_name = data.get('unit_name', 'Unknown')
         intrusion_type = data.get('intrusion_type_display', data.get('intrusion_type', '入侵痕迹'))
         severity_level = data.get('severity_level', '高危')
-        return f"【入侵痕迹报告】{unit_name}存在{intrusion_type}【{severity_level}】.docx"
-    
-    # 以下方法已删除 - 现在由BaseTemplateHandlerEnhanced通过配置自动提供:
-    # - _get_log_fields()      (从handler_config.py自动获取)
-    # - _get_log_prefix()      (从handler_config.py自动获取)
-    # - _get_db_table_name()   (从handler_config.py自动获取)
-    # - _build_db_record()     (从handler_config.py自动获取)
+        filename = f"【入侵痕迹报告】{unit_name}存在{intrusion_type}【{severity_level}】.docx"
 
+        output_path = ctx.build_output_path(unit_name, filename)
+        final_path = ctx.save_document(doc, output_path)
+
+        return True, final_path, "Intrusion report generated successfully"
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return False, "", f"Report generation failed: {str(e)}"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Runtime adapter — bridges PluginRuntime descriptor protocol
+# ═══════════════════════════════════════════════════════════════════
 
 def execute(
     data: Dict[str, Any],
@@ -229,11 +175,57 @@ def execute(
     template_id: str = "intrusion_report",
 ) -> Dict[str, Any]:
     """Descriptor execution entrypoint for plugin runtime."""
-    handler = IntrusionReportHandler(template_manager, template_id, config)
-    return handler.run(data, output_dir)
+    from backend.core.generation_context import GenerationContext
+    from backend.core.logger import setup_logger
+    from backend.core.schema_loader import SchemaLoader
 
+    template_dir = os.path.join(template_manager.templates_dir, template_id)
+    template_info = SchemaLoader.load_schema(template_dir)
+    runtime_cfg = SchemaLoader.load_runtime(template_dir)
 
-LEGACY_HANDLER = IntrusionReportHandler
+    logger = setup_logger('IntrusionReport')
+    ctx = GenerationContext(template_dir, template_info, config, output_dir, logger)
+
+    # Resolve attack method via ctx before preprocess (eliminates DbDataReader in handler)
+    pre_data = dict(data or {})
+    if not pre_data.get('attack_method_custom', '').strip() and pre_data.get('attack_method'):
+        vuln_name = ctx.get_vulnerability_name(pre_data['attack_method'])
+        if vuln_name:
+            pre_data['attack_method_display'] = vuln_name
+
+    # Preprocess
+    processed = preprocess(pre_data, config or {})
+
+    # Validate
+    is_valid, errors = validate(processed, config or {}, template_info)
+    if not is_valid:
+        return {
+            "success": False,
+            "report_path": "",
+            "message": "Data validation failed: " + "; ".join(errors),
+            "errors": errors,
+        }
+
+    # Generate
+    success, path, msg = generate(processed, ctx)
+
+    # Postprocess
+    if success:
+        ctx.postprocess(
+            path, processed,
+            log_prefix=runtime_cfg.get('log_prefix', ''),
+            log_fields=runtime_cfg.get('log_fields', []),
+            db_table=runtime_cfg.get('db_table', ''),
+            db_name=f"{datetime.now().strftime('%Y-%m-%d')}_output.db",
+            db_field_map=runtime_cfg.get('db_fields', {}),
+        )
+
+    return {
+        "success": success,
+        "report_path": path,
+        "message": msg,
+        "errors": errors if not success else [],
+    }
 
 
 PLUGIN = {

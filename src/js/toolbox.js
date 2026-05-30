@@ -114,7 +114,7 @@ window.AppToolbox = {
                 if (!target) {
                     return;
                 }
-                target.value = JSON.stringify({ Attack_Defense: 100, penetration_test: 20 }, null, 2);
+                target.value = JSON.stringify({ template_name: 100, another_template: 20 }, null, 2);
             });
         }
 
@@ -141,6 +141,19 @@ window.AppToolbox = {
         const btnIcpAdd = document.getElementById('btn-icp-add');
         if(btnIcpAdd) btnIcpAdd.addEventListener('click', () => this.openIcpModal());
 
+        const btnIcpImport = document.getElementById('btn-icp-import');
+        const icpImportInput = document.getElementById('icp-import-input');
+        if(btnIcpImport && icpImportInput) {
+            btnIcpImport.addEventListener('click', () => icpImportInput.click());
+            icpImportInput.addEventListener('change', (e) => {
+                if (e.target.files.length) this.importIcp(e.target.files[0]);
+                e.target.value = '';
+            });
+        }
+
+        const btnIcpTemplate = document.getElementById('btn-icp-template');
+        if(btnIcpTemplate) btnIcpTemplate.addEventListener('click', () => this.downloadIcpTemplate());
+
         const btnIcpBatchDel = document.getElementById('btn-icp-batch-delete');
         if(btnIcpBatchDel) btnIcpBatchDel.addEventListener('click', () => this.batchDeleteIcp());
 
@@ -151,6 +164,27 @@ window.AppToolbox = {
                 this.saveIcpEntry();
             });
         }
+
+        // ICP export
+        const btnIcpExport = document.getElementById('btn-icp-export');
+        if(btnIcpExport) btnIcpExport.addEventListener('click', () => this.exportIcp());
+
+        // Vuln import/export/template
+        const btnVulnImport = document.getElementById('btn-vuln-import');
+        const vulnImportInput = document.getElementById('vuln-import-input');
+        if(btnVulnImport && vulnImportInput) {
+            btnVulnImport.addEventListener('click', () => vulnImportInput.click());
+            vulnImportInput.addEventListener('change', (e) => {
+                if (e.target.files.length) this.importVuln(e.target.files[0]);
+                e.target.value = '';
+            });
+        }
+
+        const btnVulnExport = document.getElementById('btn-vuln-export');
+        if(btnVulnExport) btnVulnExport.addEventListener('click', () => this.exportVuln());
+
+        const btnVulnTemplate = document.getElementById('btn-vuln-template');
+        if(btnVulnTemplate) btnVulnTemplate.addEventListener('click', () => this.downloadVulnTemplate());
     },
 
     generateMergeFilename() {
@@ -746,6 +780,74 @@ window.AppToolbox = {
             } catch(e) {
                 AppUtils.showToast(e.message, "error");
             }
+        }
+    },
+
+    async importIcp(file) {
+        try {
+            AppUtils.showToast('正在导入...', 'info');
+            const result = await window.AppAPI.Icp.importFile(file, false);
+            if (result.success) {
+                AppUtils.showToast(`导入完成：新增 ${result.imported} 条，跳过 ${result.skipped} 条`, 'success');
+                this.loadIcpList();
+            } else {
+                AppUtils.showToast(result.error || '导入失败', 'error');
+            }
+        } catch(e) {
+            AppUtils.showToast('导入失败: ' + e.message, 'error');
+        }
+    },
+
+    async downloadIcpTemplate() {
+        try {
+            await window.AppAPI.Icp.downloadTemplate();
+            AppUtils.showToast('模板下载中...', 'success');
+        } catch(e) {
+            AppUtils.showToast('下载失败: ' + e.message, 'error');
+        }
+    },
+
+    async exportIcp() {
+        try {
+            await window.AppAPI.Icp.exportFile();
+            AppUtils.showToast('导出成功', 'success');
+        } catch(e) {
+            AppUtils.showToast('导出失败: ' + e.message, 'error');
+        }
+    },
+
+    async importVuln(file) {
+        try {
+            AppUtils.showToast('正在导入...', 'info');
+            const result = await window.AppAPI.Vulnerabilities.importFile(file, false);
+            if (result.success) {
+                AppUtils.showToast(`导入完成：新增 ${result.imported} 条，跳过 ${result.skipped} 条`, 'success');
+                if (window.AppVulnManager && window.AppVulnManager.reload) {
+                    await window.AppVulnManager.reload();
+                }
+            } else {
+                AppUtils.showToast(result.error || '导入失败', 'error');
+            }
+        } catch(e) {
+            AppUtils.showToast('导入失败: ' + e.message, 'error');
+        }
+    },
+
+    async exportVuln() {
+        try {
+            await window.AppAPI.Vulnerabilities.exportFile();
+            AppUtils.showToast('导出成功', 'success');
+        } catch(e) {
+            AppUtils.showToast('导出失败: ' + e.message, 'error');
+        }
+    },
+
+    async downloadVulnTemplate() {
+        try {
+            await window.AppAPI.Vulnerabilities.downloadTemplate();
+            AppUtils.showToast('模板下载中...', 'success');
+        } catch(e) {
+            AppUtils.showToast('下载失败: ' + e.message, 'error');
         }
     },
 };

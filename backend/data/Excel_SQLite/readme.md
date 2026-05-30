@@ -184,12 +184,12 @@ python xlsx_to_sqlite.py --db2xlsx --file data/combined.db --separate
 
 #### 示例5：转换指定表到单个Excel文件
 ```bash
-python xlsx_to_sqlite.py --db2xlsx --file data/combined.db --tables vulnerabilities_Sheet1 icp_info_Sheet1
+python xlsx_to_sqlite.py --db2xlsx --file data/combined.db --tables vulnerabilities icp_info
 ```
 
 #### 示例6：将指定表保存为独立Excel文件
 ```bash
-python xlsx_to_sqlite.py --db2xlsx --file data/combined.db --tables vulnerabilities_Sheet1 --separate --output exports/
+python xlsx_to_sqlite.py --db2xlsx --file data/combined.db --tables vulnerabilities --separate --output exports/
 ```
 
 #### 示例7：查看数据库表

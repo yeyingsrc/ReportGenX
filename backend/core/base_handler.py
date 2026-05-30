@@ -13,7 +13,7 @@ from datetime import datetime
 from docx import Document
 from docx.document import Document as DocxDocument
 
-from .handler_registry import HandlerRegistry, register_handler
+from .handler_registry import HandlerRegistry
 from .logger import setup_logger
 
 # 初始化日志记录器
@@ -47,22 +47,20 @@ class BaseTemplateHandler(ABC):
     4. 后处理 (postprocess)
     """
     
-    def __init__(self, template_manager: Any, template_id: str, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, template_dir: str, template_info: Any, config: Optional[Dict[str, Any]] = None):
         """
         初始化处理器
         
         Args:
-            template_manager: 模板管理器实例
-            template_id: 模板ID
+            template_dir: 模板目录绝对路径 (e.g. backend/templates/vuln_report)
+            template_info: TemplateInfo Pydantic 模型实例
             config: 全局配置
         """
-        self.template_manager = template_manager
-        self.template_id = template_id
+        self.template_dir = template_dir
+        self.template_id = template_info.id
+        self.template_info = template_info
         self.config = config or {}
-        self.template_info: Any = template_manager.get_template(template_id)
-        
-        if not self.template_info:
-            raise ValueError(f"Template not found: {template_id}")
+        self.template_manager = None  # 解耦后不再依赖 TemplateManager 实例
     
     @abstractmethod
     def preprocess(self, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -87,7 +85,7 @@ class BaseTemplateHandler(ABC):
         """
         数据验证
         
-        验证数据是否符合模板要求，默认使用 TemplateManager 的验证逻辑
+        验证数据是否符合模板要求，基于 self.template_info 的字段定义。
         子类可以覆盖此方法添加自定义验证
         
         Args:
@@ -96,7 +94,36 @@ class BaseTemplateHandler(ABC):
         Returns:
             (是否有效, 错误信息列表)
         """
-        return self.template_manager.validate_report_data(self.template_id, data)
+        if not self.template_info:
+            return True, []
+        
+        errors = []
+        
+        # 检查必填字段
+        for field_def in self.template_info.fields:
+            if field_def.required:
+                value = data.get(field_def.key, "")
+                if not value or (isinstance(value, str) and not value.strip()):
+                    errors.append(f"字段 '{field_def.label}' 为必填项")
+            
+            # 检查字段验证规则
+            if field_def.validation:
+                pattern = field_def.validation.get('pattern')
+                if pattern:
+                    value = data.get(field_def.key, "")
+                    if value and not re.match(pattern, str(value)):
+                        errors.append(field_def.validation.get('message', f"字段 '{field_def.label}' 格式不正确"))
+        
+        # 检查全局验证规则
+        for rule in self.template_info.validation_rules:
+            if rule.rule == 'required':
+                for field_key in rule.fields:
+                    value = data.get(field_key, "")
+                    if not value or (isinstance(value, str) and not value.strip()):
+                        errors.append(rule.message)
+                        break
+        
+        return len(errors) == 0, errors
     
     @abstractmethod
     def generate(self, data: Dict[str, Any], output_dir: str) -> Tuple[bool, str, str]:
@@ -248,16 +275,115 @@ class BaseTemplateHandler(ABC):
     # ========== 工具方法 ==========
     
     def get_template_path(self) -> Optional[str]:
-        """获取模板文件路径"""
-        return self.template_manager.get_template_file_path(self.template_id)
+        """获取模板文件路径 (自包含模式，不依赖 TemplateManager)"""
+        template_file = os.path.join(self.template_dir, self.template_info.template_file)
+        if os.path.exists(template_file):
+            return template_file
+        return None
+    
+    def _build_replacements(self, data: Dict[str, Any], 
+                           extra: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
+        """
+        根据模板定义和数据构建替换字典 (自包含模式)
+        
+        Args:
+            data: 前端提交的数据
+            extra: 额外的替换项 (如 supplierName, reportTime)
+            
+        Returns:
+            替换字典 {"#key#": "value", ...}
+        """
+        replacements = {}
+        
+        # 从模板字段构建
+        if self.template_info:
+            for field_def in self.template_info.fields:
+                # 优先使用模板中定义的占位符
+                if field_def.template_placeholder:
+                    key = field_def.template_placeholder
+                else:
+                    key = f"#{field_def.key}#"
+                
+                value = data.get(field_def.key)
+                if value is None:
+                    value = field_def.default if field_def.default != 'today' else ''
+                
+                # 特殊处理：跳过图片类型和复杂类型，由专门的处理器处理
+                if field_def.type in ('image', 'image_list', 'grouped_image_list'):
+                    continue
+                if isinstance(value, list):
+                    # 图片列表等复杂类型，跳过文本替换
+                    continue
+                else:
+                    replacements[key] = str(value) if value is not None else ""
+        
+        # 合并额外数据
+        if extra:
+            for k, v in extra.items():
+                if not k.startswith("#"):
+                    k = f"#{k}#"
+                replacements[k] = str(v) if v is not None else ""
+        
+        return replacements
     
     def build_replacements(self, data: Dict[str, Any], extra: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
-        """构建替换字典"""
-        return self.template_manager.build_replacements(self.template_id, data, extra)
+        """构建替换字典 (自包含模式)"""
+        return self._build_replacements(data, extra)
+    
+    def _generate_output_path(self, data: Dict[str, Any], base_output_dir: str) -> str:
+        """
+        根据模板配置生成输出路径 (自包含模式)
+        
+        Args:
+            data: 报告数据
+            base_output_dir: 基础输出目录
+            
+        Returns:
+            完整的输出文件路径
+        """
+        if not self.template_info:
+            return os.path.join(base_output_dir, "report.docx")
+        
+        output_config = self.template_info.output_config
+        
+        # 解析文件名模式
+        filename_pattern = output_config.get('filename_pattern', '{vul_name}_{date}.docx')
+        output_dir_pattern = output_config.get('output_dir', '')
+        
+        # 替换变量
+        now = datetime.now()
+        replacements = {
+            'date': now.strftime('%Y-%m-%d'),
+            'datetime': now.strftime('%Y%m%d_%H%M%S'),
+            'timestamp': str(int(now.timestamp()))
+        }
+        replacements.update(data)
+        
+        # 解析文件名
+        filename = filename_pattern
+        for key, value in replacements.items():
+            filename = filename.replace(f'{{{key}}}', str(value) if value else '')
+        
+        # 清理文件名中的非法字符
+        filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
+        
+        # 解析输出目录
+        if output_dir_pattern:
+            output_dir = output_dir_pattern
+            for key, value in replacements.items():
+                output_dir = output_dir.replace(f'{{{key}}}', str(value) if value else '')
+            output_dir = os.path.join(base_output_dir, output_dir)
+        else:
+            output_dir = base_output_dir
+        
+        # 确保目录存在
+        os.makedirs(output_dir, exist_ok=True)
+        
+        return os.path.join(output_dir, filename)
     
     def generate_output_path(self, data: Dict[str, Any], output_dir: str) -> str:
-        """生成输出路径"""
-        return self.template_manager.generate_output_path(self.template_id, data, output_dir)
+        """生成输出路径 (自包含模式)"""
+        return self._generate_output_path(data, output_dir)
     
     def load_document(self) -> Optional[DocxDocument]:
         """加载 Word 文档模板"""
@@ -752,4 +878,4 @@ class BaseTemplateHandler(ABC):
         for token in cleanup_tokens:
             img_processor.replace_placeholder_with_images(token, [])
 
-__all__ = ["BaseTemplateHandler", "HandlerRegistry", "register_handler"]
+__all__ = ["BaseTemplateHandler", "HandlerRegistry"]

@@ -11,8 +11,21 @@ from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 from functools import lru_cache
 import re
-from pydantic import BaseModel, Field, field_validator, model_validator
 from .logger import setup_logger
+from .schema_models import (
+    ALLOWED_FIELD_TYPES,
+    ALLOWED_DATA_SOURCE_TYPES,
+    ALLOWED_ACTION_TYPES,
+    Behavior,
+    BehaviorAction,
+    DataSourceDef,
+    FieldDefinition,
+    FieldGroup,
+    PreviewField,
+    TemplateInfo,
+    ValidationRule,
+    validate_template_id,
+)
 
 from .exceptions import (
     TemplateNotFoundError,
@@ -25,37 +38,6 @@ from .exceptions import (
 
 # 初始化日志记录器
 logger = setup_logger('TemplateManager')
-
-
-def validate_template_id(template_id: str) -> bool:
-    """
-    验证模板 ID 是否符合 Python 模块命名规范
-    
-    规则：
-    - 只允许字母、数字、下划线
-    - 不能以数字开头
-    - 推荐使用 snake_case 命名（如 vuln_report）
-    
-    Args:
-        template_id: 模板 ID
-        
-    Returns:
-        bool: 是否有效
-        
-    Examples:
-        >>> validate_template_id("vuln_report")
-        True
-        >>> validate_template_id("my-template")
-        False
-        >>> validate_template_id("123test")
-        False
-    """
-    if not template_id:
-        return False
-    
-    # 只允许字母、数字、下划线，且不能以数字开头
-    pattern = r'^[a-zA-Z_][a-zA-Z0-9_]*$'
-    return bool(re.match(pattern, template_id))
 
 
 def validate_path_safety(path: str, base_dir: str) -> bool:
@@ -86,188 +68,6 @@ def validate_path_safety(path: str, base_dir: str) -> bool:
         return False
 
 
-
-
-# 允许的字段类型
-ALLOWED_FIELD_TYPES = {
-    'text', 'select', 'textarea', 'date', 'image', 'image_list', 
-    'searchable_select', 'checkbox', 'checkbox_group', 'number',
-    'target_list', 'vuln_list', 'tester_info_list',
-    'array', 'server_type_group', 'db_screenshot_group'
-}
-
-# 允许的数据源类型
-ALLOWED_DATA_SOURCE_TYPES = {'database', 'config', 'api'}
-
-# 允许的行为动作类型
-ALLOWED_ACTION_TYPES = {'api_call', 'compute', 'set_value'}
-
-
-class FieldDefinition(BaseModel):
-    """字段定义 (Pydantic 模型，带运行时验证)"""
-    key: str = Field(..., description="字段键名 (对应模板中的占位符，不含 #)")
-    label: str = Field(..., description="显示标签")
-    type: str = Field(..., description="字段类型")
-    required: bool = Field(default=False, description="是否必填")
-    default: Any = Field(default="", description="默认值")
-    placeholder: str = Field(default="", description="输入提示")
-    help_text: str = Field(default="", description="帮助文本")
-    options: List[Any] = Field(default_factory=list, description="下拉选项")
-    source: str = Field(default="", description="数据源")
-    max_count: int = Field(default=5, ge=1, le=100, description="最大数量")
-    group: str = Field(default="default", description="字段分组")
-    order: int = Field(default=0, ge=0, description="显示顺序")
-    readonly: bool = Field(default=False, description="是否只读")
-    computed: bool = Field(default=False, description="是否计算字段")
-    compute_from: str = Field(default="", description="计算来源字段")
-    compute_rule: Dict[str, Any] = Field(default_factory=dict, description="计算规则")
-    on_change: str = Field(default="", description="值变化时触发的行为ID")
-    validation: Dict[str, Any] = Field(default_factory=dict, description="验证规则")
-    auto_generate: bool = Field(default=False, description="是否自动生成")
-    auto_generate_rule: str = Field(default="", description="自动生成规则")
-    auto_fill_from: str = Field(default="", description="自动填充来源")
-    fill_field: str = Field(default="", description="填充的字段名")
-    template_placeholder: str = Field(default="", description="模板中的占位符")
-    inline_group: str = Field(default="", description="内联分组")
-    rows: int = Field(default=3, ge=1, le=50, description="textarea 行数")
-    accept: str = Field(default="", description="文件接受类型")
-    max_size_mb: int = Field(default=5, ge=1, le=100, description="最大文件大小MB")
-    paste_enabled: bool = Field(default=False, description="是否支持粘贴")
-    with_description: bool = Field(default=False, description="图片是否带描述")
-    description_placeholder: str = Field(default="", description="描述输入提示")
-    search_placeholder: str = Field(default="", description="搜索提示")
-    display_field: str = Field(default="", description="显示字段")
-    value_field: str = Field(default="", description="值字段")
-    editable_config: bool = Field(default=False, description="是否可编辑配置")
-    save_to_config: bool = Field(default=False, description="是否保存到配置")
-    presets: Dict[str, Any] = Field(default_factory=dict, description="预设值")
-    show_if: Dict[str, Any] = Field(default_factory=dict, description="条件显示逻辑")
-    transform: str = Field(default="", description="数据转换规则")
-    columns: List[Dict[str, Any]] = Field(default_factory=list, description="列定义(复杂类型)")
-    
-    model_config = {"extra": "allow"}  # 允许额外字段，保持向后兼容
-    
-    @field_validator('type')
-    @classmethod
-    def validate_field_type(cls, v: str) -> str:
-        """验证字段类型是否在允许列表中"""
-        if v not in ALLOWED_FIELD_TYPES:
-            logger.warning(f"Unknown field type: {v}, allowed types: {ALLOWED_FIELD_TYPES}")
-            # 不抛出异常，只警告，保持向后兼容
-        return v
-    
-    @field_validator('key')
-    @classmethod
-    def validate_key_format(cls, v: str) -> str:
-        """验证字段键名格式"""
-        if not v:
-            raise ValueError("Field key cannot be empty")
-        if not re.match(r'^[a-zA-Z_][a-zA-Z0-9_]*$', v):
-            logger.warning(f"Field key '{v}' does not follow snake_case convention")
-        return v
-
-
-class FieldGroup(BaseModel):
-    """字段分组"""
-    id: str
-    name: str
-    icon: str = ""
-    order: int = Field(default=0, ge=0)
-    collapsed: bool = False
-
-
-class DataSourceDef(BaseModel):
-    """数据源定义"""
-    id: str
-    type: str
-    description: str = ""
-    config_key: str = ""
-    endpoint: str = ""
-    
-    @field_validator('type')
-    @classmethod
-    def validate_type(cls, v: str) -> str:
-        if v not in ALLOWED_DATA_SOURCE_TYPES:
-            raise ValueError(f"Invalid data source type: {v}, allowed: {ALLOWED_DATA_SOURCE_TYPES}")
-        return v
-
-
-class BehaviorAction(BaseModel):
-    """行为动作"""
-    type: str
-    endpoint: str = ""
-    params: Dict[str, Any] = Field(default_factory=dict)
-    result_mapping: Dict[str, Any] = Field(default_factory=dict)
-    target: str = ""
-    rules: Dict[str, Any] = Field(default_factory=dict)
-    expression: str = ""  # compute 类型的表达式
-    
-    @field_validator('type')
-    @classmethod
-    def validate_type(cls, v: str) -> str:
-        if v not in ALLOWED_ACTION_TYPES:
-            logger.warning(f"Unknown action type: {v}")
-        return v
-
-
-class Behavior(BaseModel):
-    """行为定义"""
-    id: str
-    trigger_field: str = ""
-    trigger_event: str = "change"
-    actions: List[BehaviorAction] = Field(default_factory=list)
-
-
-class ValidationRule(BaseModel):
-    """验证规则"""
-    fields: List[str]
-    rule: str
-    message: str
-
-
-class PreviewField(BaseModel):
-    """预览字段"""
-    key: str
-    label: str
-
-
-class TemplateInfo(BaseModel):
-    """模板信息"""
-    id: str
-    name: str
-    description: str = ""
-    version: str = "1.0.0"
-    order: int = Field(default=999, ge=0)
-    template_file: str = ""
-    icon: str = ""
-    author: str = ""
-    create_time: str = ""
-    update_time: str = ""
-    fields: List[FieldDefinition] = Field(default_factory=list)
-    field_groups: List[FieldGroup] = Field(default_factory=list)
-    data_sources: List[DataSourceDef] = Field(default_factory=list)
-    behaviors: List[Behavior] = Field(default_factory=list)
-    validation_rules: List[ValidationRule] = Field(default_factory=list)
-    output_config: Dict[str, Any] = Field(default_factory=dict)
-    preview_config: Dict[str, Any] = Field(default_factory=dict)
-    dependent_fields: Dict[str, Any] = Field(default_factory=dict)
-    summary_configs: Dict[str, Any] = Field(default_factory=dict)
-    
-    @field_validator('id')
-    @classmethod
-    def validate_template_id(cls, v: str) -> str:
-        """验证模板 ID 格式 (snake_case)"""
-        if not validate_template_id(v):
-            raise ValueError(f"Invalid template ID format: {v}. Must be snake_case (e.g., vuln_report)")
-        return v
-    
-    @field_validator('version')
-    @classmethod
-    def validate_version_format(cls, v: str) -> str:
-        """验证版本号格式"""
-        if not re.match(r'^\d+\.\d+\.\d+$', v):
-            logger.warning(f"Version '{v}' does not follow semantic versioning (x.y.z)")
-        return v
 
 
 class TemplateManager:
@@ -329,109 +129,13 @@ class TemplateManager:
             logger.error(f"Invalid template ID format: {template_id}")
             return
         
-        try:
-            with open(schema_path, 'r', encoding='utf-8') as f:
-                schema = yaml.safe_load(f)
-        except Exception as e:
-            logger.error(f"Failed to load schema for {template_id}: {e}")
-            return
+        template_dir = os.path.dirname(schema_path)
         
         try:
-            # 使用 Pydantic 模型直接从字典解析（自动验证）
+            from .schema_loader import SchemaLoader
             
-            # 解析字段分组
-            field_groups = []
-            for idx, group_data in enumerate(schema.get('field_groups', [])):
-                group_data.setdefault('id', f'group_{idx}')
-                group_data.setdefault('order', idx)
-                try:
-                    group = FieldGroup(**group_data)
-                    field_groups.append(group)
-                except Exception as e:
-                    logger.warning(f"Invalid field group in {template_id}: {e}")
-            field_groups.sort(key=lambda x: x.order)
-            
-            # 解析数据源定义
-            data_sources = []
-            for ds_data in schema.get('data_sources', []):
-                try:
-                    ds = DataSourceDef(**ds_data)
-                    data_sources.append(ds)
-                except Exception as e:
-                    logger.warning(f"Invalid data source in {template_id}: {e}")
-            
-            # 解析字段定义
-            fields = []
-            for idx, field_data in enumerate(schema.get('fields', [])):
-                field_data.setdefault('order', idx)
-                try:
-                    field_def = FieldDefinition(**field_data)
-                    fields.append(field_def)
-                except Exception as e:
-                    logger.warning(f"Invalid field '{field_data.get('key', 'unknown')}' in {template_id}: {e}")
-            
-            # 按 order 排序
-            fields.sort(key=lambda x: x.order)
-            
-            # 解析行为定义
-            behaviors = []
-            for beh_data in schema.get('behaviors', []):
-                trigger = beh_data.get('trigger', {})
-                actions = []
-                for act_data in beh_data.get('actions', []):
-                    try:
-                        action = BehaviorAction(**act_data)
-                        actions.append(action)
-                    except Exception as e:
-                        logger.warning(f"Invalid action in {template_id}: {e}")
-                
-                try:
-                    behavior = Behavior(
-                        id=beh_data.get('id', ''),
-                        trigger_field=trigger.get('field', ''),
-                        trigger_event=trigger.get('event', 'change'),
-                        actions=actions
-                    )
-                    behaviors.append(behavior)
-                except Exception as e:
-                    logger.warning(f"Invalid behavior in {template_id}: {e}")
-            
-            # 解析验证规则
-            validation_rules = []
-            validation_data = schema.get('validation', {})
-            for rule_data in validation_data.get('rules', []):
-                try:
-                    rule = ValidationRule(**rule_data)
-                    validation_rules.append(rule)
-                except Exception as e:
-                    logger.warning(f"Invalid validation rule in {template_id}: {e}")
-            
-            # 创建模板信息（使用 Pydantic 模型）
-            try:
-                template_info = TemplateInfo(
-                    id=schema.get('id', template_id),
-                    name=schema.get('name', template_id),
-                    description=schema.get('description', ''),
-                    version=schema.get('version', '1.0.0'),
-                    order=schema.get('order', 999),
-                    template_file=schema.get('template_file', 'template.docx'),
-                    icon=schema.get('icon', ''),
-                    author=schema.get('author', ''),
-                    create_time=schema.get('create_time', ''),
-                    update_time=schema.get('update_time', ''),
-                    fields=fields,
-                    field_groups=field_groups,
-                    data_sources=data_sources,
-                    behaviors=behaviors,
-                    validation_rules=validation_rules,
-                    output_config=schema.get('output', {}),
-                    preview_config=schema.get('preview', {}),
-                    dependent_fields=schema.get('dependent_fields', {}),
-                    summary_configs=schema.get('summary_configs', {})
-                )
-            except Exception as e:
-                logger.error(f"Failed to create TemplateInfo for {template_id}: {e}")
-                return
+            # Use SchemaLoader to parse schema.yaml into TemplateInfo
+            template_info = SchemaLoader.load_schema(template_dir)
             
             self._templates[template_info.id] = template_info
             
@@ -444,9 +148,11 @@ class TemplateManager:
             logger.info(f"Loaded template: {template_info.id} v{template_info.version} ({template_info.name})")
             
             # 动态加载 handler（阶段 1：任务 1.1）
-            template_dir = os.path.dirname(schema_path)
             self._load_handler(template_info.id, template_dir)
             
+        except FileNotFoundError as e:
+            error = TemplateLoadError(template_id, str(e))
+            logger.error(str(error))
         except KeyError as e:
             error = TemplateLoadError(template_id, f"Missing required field in schema: {str(e)}")
             logger.error(str(error))
@@ -515,7 +221,7 @@ class TemplateManager:
         
         功能：
         1. 使用 importlib 动态导入 handler.py
-        2. @register_handler 装饰器自动注册到 HandlerRegistry
+        2. HandlerRegistry.register() 注册到 HandlerRegistry
         
         Args:
             template_id: 模板ID
@@ -549,7 +255,7 @@ class TemplateManager:
             # 添加到 sys.modules，避免重复加载
             sys.modules[module_name] = module
             
-            # 执行模块（触发 @register_handler 装饰器）
+            # 执行模块（触发 HandlerRegistry.register()）
             spec.loader.exec_module(module)
             
             # 收集模板路由（如果有）
@@ -681,46 +387,9 @@ class TemplateManager:
             field: 字段定义对象
             
         Returns:
-            字段字典
+            字段字典（包含所有字段和额外字段）
         """
-        return {
-            "key": field.key,
-            "label": field.label,
-            "type": field.type,
-            "required": field.required,
-            "default": field.default,
-            "placeholder": field.placeholder,
-            "help_text": field.help_text,
-            "options": field.options,
-            "source": field.source,
-            "max_count": field.max_count,
-            "group": field.group,
-            "order": field.order,
-            "readonly": field.readonly,
-            "computed": field.computed,
-            "compute_from": field.compute_from,
-            "compute_rule": field.compute_rule,
-            "on_change": field.on_change,
-            "validation": field.validation,
-            "auto_generate": field.auto_generate,
-            "auto_generate_rule": field.auto_generate_rule,
-            "auto_fill_from": field.auto_fill_from,
-            "template_placeholder": field.template_placeholder,
-            "inline_group": field.inline_group,
-            "rows": field.rows,
-            "accept": field.accept,
-            "max_size_mb": field.max_size_mb,
-            "paste_enabled": field.paste_enabled,
-            "with_description": field.with_description,
-            "description_placeholder": field.description_placeholder,
-            "search_placeholder": field.search_placeholder,
-            "display_field": field.display_field,
-            "value_field": field.value_field,
-            "editable_config": field.editable_config,
-            "save_to_config": field.save_to_config,
-            "presets": field.presets,
-            "columns": field.columns
-        }
+        return field.model_dump()
     
     def _serialize_field_group(self, group: FieldGroup) -> Dict[str, Any]:
         """
@@ -732,13 +401,7 @@ class TemplateManager:
         Returns:
             字段分组字典
         """
-        return {
-            "id": group.id,
-            "name": group.name,
-            "icon": group.icon,
-            "order": group.order,
-            "collapsed": group.collapsed
-        }
+        return group.model_dump()
     
     def _serialize_data_source(self, ds: DataSourceDef) -> Dict[str, Any]:
         """
@@ -750,12 +413,7 @@ class TemplateManager:
         Returns:
             数据源字典
         """
-        return {
-            "id": ds.id,
-            "type": ds.type,
-            "description": ds.description,
-            "config_key": ds.config_key
-        }
+        return ds.model_dump()
     
     def _serialize_behavior(self, behavior: Behavior) -> Dict[str, Any]:
         """
@@ -773,17 +431,7 @@ class TemplateManager:
                 "field": behavior.trigger_field,
                 "event": behavior.trigger_event
             },
-            "actions": [
-                {
-                    "type": a.type,
-                    "endpoint": a.endpoint,
-                    "params": a.params,
-                    "result_mapping": a.result_mapping,
-                    "target": a.target,
-                    "rules": a.rules
-                }
-                for a in behavior.actions
-            ]
+            "actions": [a.model_dump() for a in behavior.actions]
         }
     
     @lru_cache(maxsize=128)
@@ -971,7 +619,7 @@ class TemplateManager:
                 value = field_def.default if field_def.default != 'today' else ''
             
             # 特殊处理：跳过图片类型和复杂类型，由专门的处理器处理
-            if field_def.type in ('image', 'image_list', 'db_screenshot_group', 'server_type_group'):
+            if field_def.type in ('image', 'image_list', 'grouped_image_list'):
                 continue
             if isinstance(value, list):
                 # 图片列表等复杂类型，跳过文本替换
@@ -1072,6 +720,10 @@ class TemplateManager:
         'pydantic',            # 数据验证
         'packaging',           # 版本处理
         'PyInstaller',         # 打包工具
+
+        # 项目内部包 (Project Internal)
+        'core',                # SDK facade layer
+        'backend',             # Core implementation layer (GenerationContext etc.)
 
         # 常用底层依赖
         'urllib3', 'certifi', 'idna', 'charset-normalizer', 'six',
