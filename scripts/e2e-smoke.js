@@ -8,7 +8,6 @@ async function runSmoke() {
   const launchArgs = [appPath]
 
   const electronApp = await electron.launch({
-    executablePath: require('electron'),
     args: launchArgs,
     timeout: 120000,
     env: {

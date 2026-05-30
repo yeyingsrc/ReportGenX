@@ -38,11 +38,8 @@ jobs:
       - name: Install Node dependencies
         run: npm install --no-fund --no-audit --ignore-scripts
 
-      - name: Install Electron binary
-        run: node node_modules/electron/install.js
-
-      - name: Verify Electron
-        run: npx electron --version
+      - name: Install Playwright Electron
+        run: npx playwright install electron
 
       - name: Check version sync
         run: npm run check-version
