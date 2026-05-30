@@ -1,9 +1,8 @@
 # PROJECT_OVERVIEW
 
-> 面向接手开发者的快速上下文文档  
-> 更新时间：2026-03-30  
-> 仓库状态：已归档（只读）  
-> 当前版本：0.18.4
+> 面向接手开发者的快速上下文文档
+> 更新时间：2026-05-30
+> 当前版本：0.20.1
 
 ## 1. 项目定位
 
@@ -11,9 +10,9 @@
 
 核心能力：
 
-- 模板驱动报告生成（`schema.yaml + handler.py`）
-- 漏洞库管理（增删改查）
-- ICP 信息管理（增删改查 + 批量删除）
+- 模板驱动报告生成（`schema.yaml` + PLUGIN descriptor `handler.py` + `GenerationContext`）
+- 漏洞库管理（增删改查、Excel 导入导出）
+- ICP 信息管理（增删改查、批量删除）
 - 报告列表、删除、合并
 - 模板导入/导出/热加载
 
@@ -34,11 +33,12 @@
 
 ### 后端
 
-- FastAPI：`backend/api.py`
+- FastAPI：`backend/api.py`（~2174 行，单文件全量 API）
 - 核心逻辑：`backend/core/*`
+- SDK 门面：`core/__init__.py`（从 backend.core.* 重导出）
 - 插件运行时：`backend/plugin_host/runtime.py`
-- 模板目录：`backend/templates/*`
-- 数据库：`backend/data/combined.db`
+- 模板目录：`backend/templates/*`（5 个模板）
+- 数据库：`backend/data/combined.db`（SQLite）
 
 ---
 
@@ -47,14 +47,15 @@
 - `main.js`：后端进程生命周期、启动握手、外链安全策略
 - `preload.js`：将 `apiBaseUrl`/`appApiToken` 注入渲染层
 - `src/js/api.js`：统一 API 调用与 token header 注入
-- `src/js/form-renderer.js`：报告生成主流程
+- `src/js/form-renderer.js`：动态表单引擎（报告生成主流程）
 - `src/js/toolbox.js`：工具箱业务（系统设置/模板管理/报告合并等）
 - `src/js/template-manager.js`：模板管理 UI 逻辑
 - `src/js/vuln-manager.js`：漏洞库管理
 - `src/js/crud-manager.js`：通用 CRUD 抽象
 - `backend/api.py`：API 入口、中间件、路由
-- `backend/core/template_manager.py`：模板扫描与依赖检查
-- `backend/core/base_handler.py`：模板处理器生命周期
+- `backend/core/template_manager.py`：模板扫描与依赖检查（含安全审计）
+- `backend/core/generation_context.py`：模板服务注入层（~947 行）
+- `backend/core/schema_loader.py`：YAML → Pydantic 解析
 - `backend/shared-config.json`：server/security/paths/plugin_runtime 共享配置
 
 ---
@@ -67,7 +68,7 @@
 4. 验证通过后创建窗口并加载前端
 5. `preload.js` 注入 `window.electronConfig` 与 `window.electronAPI`
 6. 渲染层通过 `window.AppAPI` 与 FastAPI 通信
-7. 生成报告请求进入 `PluginRuntime.execute()`，最终落盘并返回下载路径
+7. 生成报告请求进入 `PluginRuntime.execute()` → PLUGIN descriptor → `GenerationContext` → 落盘并返回下载路径
 
 ---
 
@@ -105,31 +106,58 @@
 - `server.host/server.port`
 - `security.external_protocols` / `security.external_hosts`
 - `paths.open_folder_allowlist`
-- `plugin_runtime.*`（mode、isolated 灰度、fallback、metrics 等）
+- `plugin_runtime.*`（11 个配置键：mode、isolated 灰度、fallback、metrics 等）
 
 ---
 
 ## 7. 模板系统
 
-每个模板目录：
+### 模板目录结构
 
-- `backend/templates/<template_id>/schema.yaml`
-- `backend/templates/<template_id>/handler.py`
-- `backend/templates/<template_id>/template.docx`（可选）
+```
+backend/templates/<template_id>/
+├── schema.yaml        # 表单定义（14 种字段类型、数据源、行为、验证规则）
+├── handler.py         # PLUGIN descriptor + execute() + pure functions
+├── template.docx      # Word 模板（含 #placeholder# 占位符）
+├── runtime.yaml       # 日志/输出配置
+└── widgets/           # 可选：自定义 JS/CSS 组件
+```
 
-运行机制：
+### 架构模式
 
-- `TemplateManager` 负责扫描模板并加载 schema
-- `PluginRuntime` 决定执行策略（descriptor/hybrid/legacy/isolated）
-- `POST /api/templates/{id}/generate` 执行模板并生成报告
+当前标准：**PLUGIN descriptor + GenerationContext**（不再使用 `BaseTemplateHandler` 类继承）。
+
+```python
+# handler.py
+PLUGIN = {
+    "id": "template_id",
+    "execute": execute,   # execute(data, output_dir, template_manager, config, template_id) -> dict
+}
+
+def generate(data, ctx):  # ctx = GenerationContext — 提供所有框架服务
+    doc = ctx.load_document()
+    ctx.replace_text(replacements)
+    ctx.process_single_image('#ph#', data.get('img'))
+    return True, ctx.save(filename), "OK"
+```
+
+### 当前模板（5 个）
+
+| 模板 ID | 名称 | 说明 |
+|---------|------|------|
+| `vuln_report` | 漏洞报告 | 标准漏洞报告，含证据截图 |
+| `intrusion_report` | 入侵痕迹报告 | 入侵痕迹报告，含时间线 |
+| `penetration_test` | 渗透测试报告 | 完整渗透测试报告，含漏洞表/风险图/目录 |
+| `Attack_Defense` | 攻防演练报告 | 攻防演练，含服务器类型/DB 连接/数据统计 |
+| `single_vuln_report` | 单个漏洞报告 | 最简模板，从漏洞库快速选取填充 |
 
 ---
 
 ## 8. 验证与 CI
 
-- 后端测试：`npm run test`
-- Electron 冒烟：`npm run test:e2e:smoke`
+- Electron 冒烟：`npm run test:e2e:smoke`（Playwright）
 - CI 冒烟工作流：`.github/workflows/ci-smoke.yml`
+- 后端单元测试：`npm run test`（已移除，当前为空操作）
 
 ---
 
@@ -142,8 +170,8 @@
 3. `src/js/api.js`
 4. `src/js/form-renderer.js`
 5. `backend/api.py`
-6. `backend/core/template_manager.py`
-7. 任一模板目录（例如 `backend/templates/vuln_report/`）
+6. `backend/core/generation_context.py`
+7. 任一模板目录（推荐 `backend/templates/single_vuln_report/` — 最简模板）
 
 高频改动入口：
 
@@ -151,3 +179,4 @@
 - 调整报告生成逻辑：改模板 `handler.py`
 - 调整接口行为：改 `backend/api.py`
 - 调整工具箱交互：改 `src/js/toolbox.js`
+- 运行时配置：`backend/shared-config.json` → `plugin_runtime` 块

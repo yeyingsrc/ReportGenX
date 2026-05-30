@@ -1,303 +1,403 @@
-# 多模板系统开发指南
+# 模板开发完整指南
 
-> ReportGenX 多模板架构开发文档  
-> 版本: 1.0.4  
-> 更新日期: 2026-03-27
-
----
-
-## 📋 目录
-
-1. [架构概述](#架构概述)
-2. [快速开始](#快速开始)
-3. [Schema 规范](#schema-规范)
-4. [Handler 开发](#handler-开发)
-5. [API 接口](#api-接口)
-6. [前端集成](#前端集成)
-7. [最佳实践](#最佳实践)
+> ReportGenX 模板系统开发文档
+> 版本: 2.0.0 | 更新日期: 2026-05-30 | 适用版本: 0.20.1
 
 ---
 
-## 架构概述
+## 目录
 
-### 系统架构图
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      前端 (Electron)                         │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │ 模板选择器   │  │ 动态表单    │  │ 模板预览             │  │
-│  │ (selector)  │  │ (renderer)  │  │ (preview)           │  │
-│  └──────┬──────┘  └──────┬──────┘  └──────────┬──────────┘  │
-└─────────┼────────────────┼───────────────────┼──────────────┘
-          │                │                   │
-          ▼                ▼                   ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    REST API (FastAPI)                        │
-│  GET /api/templates                                          │
-│  GET /api/templates/{id}/schema                              │
-│  POST /api/templates/{id}/generate                           │
-└─────────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Template Manager                          │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │ Schema解析   │  │ 数据源解析   │  │ 验证规则            │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-          │
-          ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    Handler Registry                          │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │VulnReport   │  │ Intrusion   │  │ 其他模板Handler...   │  │
-│  │Handler      │  │ Handler     │  │                     │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### 核心组件
-
-| 组件 | 文件位置 | 职责 |
-|------|----------|------|
-| TemplateManager | `backend/core/template_manager.py` | 加载/解析模板 Schema，管理版本 |
-| BaseTemplateHandler | `backend/core/base_handler.py`（模板侧可从 `core.base_handler` 导入） | 抽象基类，定义生成流程 |
-| HandlerRegistry | `backend/core/handler_registry.py` | Handler 注册与查找 |
-| AppFormRenderer | `src/js/form-renderer.js` | 动态表单渲染 |
+1. [快速开始](#0-快速开始)
+2. [架构概述](#1-架构概述)
+3. [PLUGIN 描述符规范](#2-plugin-描述符规范)
+4. [GenerationContext API](#3-generationcontext-api)
+5. [Schema 规范](#4-schema-规范)
+6. [runtime.yaml 参考](#5-runtimeyaml-参考)
+7. [Widget 系统](#6-widget-系统)
+8. [Core SDK 门面](#7-core-sdk-门面)
+9. [最佳实践](#8-最佳实践)
+10. [常见问题](#9-常见问题)
 
 ---
 
-## 快速开始
+## 0. 快速开始
 
-### 创建新模板的步骤
+5 分钟创建一个最小模板。
 
-#### 1️⃣ 创建模板目录
+### 目录结构
 
 ```
-backend/templates/
-└── your_template/           # 模板ID (唯一标识)
-    ├── schema.yaml          # 模板定义文件 (必需)
-    ├── handler.py           # 生成处理器 (必需)
-    └── template.docx        # Word模板文件 (可选)
+backend/templates/my_template/
+├── schema.yaml        # 表单定义 (必需)
+├── handler.py         # 生成逻辑 (必需)
+├── template.docx      # Word 模板 (可选)
+└── runtime.yaml       # 日志配置 (推荐)
 ```
 
-#### 2️⃣ 定义 Schema
+### handler.py
 
-创建 `schema.yaml`:
+```python
+from backend.core.generation_context import GenerationContext
+
+PLUGIN = {"id": "my_template", "execute": None}
+
+def execute(data, output_dir, template_manager, config, template_id):
+    template_dir = template_manager.get_template_dir(template_id)
+    info = template_manager.get_template_info(template_id)
+    ctx = GenerationContext(template_dir, info, config, output_dir)
+
+    doc = ctx.load_document()
+    ctx.replace_text({
+        "#title#": data.get("title", ""),
+        "#content#": data.get("content", ""),
+    })
+    path = ctx.save_document(doc, ctx.build_output_path(data.get("unit_name", "unknown"), "report.docx"))
+    ctx.postprocess(path, data, log_prefix="my_template")
+    return {"success": True, "report_path": path, "message": "生成成功", "errors": []}
+
+PLUGIN["execute"] = execute
+```
+
+### schema.yaml
 
 ```yaml
-id: your_template
-name: 你的模板名称
-description: 模板描述
+id: my_template
+name: 我的模板
 version: "1.0.0"
-icon: "📄"
-author: Your Name
+fields:
+  - id: title
+    type: text
+    label: 标题
+    required: true
+  - id: content
+    type: textarea
+    label: 内容
+output_config:
+  filename: "{{unit_name}}_report.docx"
+```
 
-template_file: template.docx
+### 加载模板
 
+```bash
+curl -X POST http://127.0.0.1:8000/api/templates/reload
+```
+
+前端刷新模板列表，选择 `my_template` 即可。
+
+> 详细说明见后续章节。
+
+---
+
+## 1. 架构概述
+
+### 模板生命周期
+
+```
+preprocess()  →  validate()  →  generate(data, ctx)  →  postprocess (ctx.postprocess)
+    │                 │                  │                         │
+    填充默认值      校验数据          使用 ctx 生成文档           TXT + SQLite 日志
+```
+
+### 关键组件
+
+| 组件 | 位置 | 职责 |
+|------|------|------|
+| `TemplateManager` | `backend/core/template_manager.py` | 扫描/加载/校验模板 |
+| `SchemaLoader` | `backend/core/schema_loader.py` | YAML → Pydantic 解析 |
+| `PluginRuntime` | `backend/plugin_host/runtime.py` | 执行调度 (descriptor/hybrid/legacy/isolated) |
+| `GenerationContext` | `backend/core/generation_context.py` | 模板服务注入层 |
+| `AppFormRenderer` | `src/js/form-renderer.js` | 前端动态表单引擎 |
+
+### 执行链路
+
+```
+POST /api/templates/{id}/generate
+  → PluginRuntime.execute(template_id, data, ...)
+    → 解析 PLUGIN 描述符
+    → 调用 execute(data, output_dir, template_manager, config, template_id)
+      → 创建 GenerationContext
+      → preprocess() → generate() → ctx.postprocess()
+    → 返回 {"success", "report_path", "message", "errors", "execution_meta"}
+```
+
+---
+
+## 2. PLUGIN 描述符规范
+
+### 标准模式（当前所有 5 个模板均使用）
+
+每个模板在 `handler.py` 中导出模块级 `PLUGIN` 字典：
+
+```python
+PLUGIN = {
+    "id": "template_id",       # 必须与目录名一致
+    "execute": execute,        # 可调用对象 (函数)
+}
+```
+
+### execute() 函数签名
+
+```python
+def execute(
+    data: Dict[str, Any],
+    output_dir: str,
+    template_manager: Any,
+    config: Optional[Dict[str, Any]] = None,
+    template_id: str = "template_name",
+) -> Dict[str, Any]:
+```
+
+**返回值规范**:
+
+```python
+{
+    "success": bool,
+    "report_path": str,        # 生成文件的绝对路径
+    "message": str,             # 成功/失败消息
+    "errors": List[str],        # 校验错误列表 (成功时为空)
+}
+```
+
+### execute() 内部最佳实践
+
+```python
+def execute(data, output_dir, template_manager, config, template_id="my_template"):
+    from backend.core.generation_context import GenerationContext
+    from backend.core.logger import setup_logger
+    from backend.core.schema_loader import SchemaLoader
+
+    template_dir = os.path.join(template_manager.templates_dir, template_id)
+    template_info = SchemaLoader.load_schema(template_dir)
+    runtime_cfg = SchemaLoader.load_runtime(template_dir)
+
+    logger = setup_logger('TemplateLogger')
+    ctx = GenerationContext(template_dir, template_info, config, output_dir, logger)
+
+    # 1. Preprocess
+    processed = preprocess(data, config or {})
+
+    # 2. Validate
+    is_valid, errors = validate(processed, config or {}, template_info)
+    if not is_valid:
+        return {"success": False, "report_path": "", "message": "; ".join(errors), "errors": errors}
+
+    # 3. Generate
+    success, path, msg = generate(processed, ctx)
+
+    # 4. Postprocess
+    if success:
+        ctx.postprocess(path, processed, **runtime_cfg_params)
+
+    return {"success": success, "report_path": path, "message": msg, "errors": [] if success else errors}
+```
+
+> ⚠️ **不再使用** `BaseTemplateHandler` 类继承 + `HandlerRegistry.register()`。当前 5 个模板全部基于 PLUGIN descriptor 模式。与 `BaseTemplateHandler` 类名保留仅作为旧模板兼容。
+
+---
+
+## 3. GenerationContext API
+
+`GenerationContext` 是注入到 `generate()` 函数的服务上下文。模板通过 `ctx` 访问所有框架能力。
+
+### 文档操作
+
+| 方法 | 说明 |
+|------|------|
+| `ctx.load_document() → Document` | 加载 template.docx |
+| `ctx.doc` (property) | 懒加载获取当前文档对象 |
+| `ctx.editor` (property) | 获取 `DocumentEditor` 实例 |
+| `ctx.img_processor` (property) | 获取 `DocumentImageProcessor` 实例 |
+
+### 文本替换
+
+```python
+ctx.replace_text(replacements: Dict[str, str], enable_risk_color=False, risk_key=None)
+# 批量替换占位符。例: {"#name#": "张三", "#date#": "2026-05-30"}
+
+ctx.replace_text_colored(replacements: Dict[str, str])
+# 替换文本并启用风险等级颜色
+```
+
+### 图片处理
+
+```python
+ctx.process_single_image('#placeholder#', image_data, fallback_text='（未提供）')
+# 处理单张图片占位符。image_data 可以是路径字符串或 {'path': '...'} 字典
+
+ctx.process_image_list('#placeholder#', images: List, keyword=None)
+# 处理图片列表。images 可以是 [str, ...] 或 [{'path': '...', 'description': '...'}, ...]
+# keyword: 可选，用于定位表格单元格中的占位符
+```
+
+### 表格操作
+
+```python
+ctx.populate_table(header_text, data_rows, row_builder_func, keep_header_rows=1, clear_indent=False)
+# 通过表头文本定位表格，用数据行填充
+# row_builder_func(row_cells, data_item): 回调函数，填写每行数据
+
+ctx.clear_paragraph_indent(para)
+# 清除段落首行缩进
+```
+
+### 目录
+
+```python
+ctx.insert_toc('#toc#', '目  录')
+# 在占位符位置插入 Word TOC 域
+```
+
+### 输出与保存
+
+```python
+ctx.save(filename: str) → str
+# 保存文档到 output_dir/filename，自动处理同名冲突。返回最终路径
+
+ctx.save_document(doc, output_path) → str
+# 保存指定文档，处理同名冲突
+
+ctx.build_output_path(unit_name, filename) → str
+# 构建输出路径: output_dir/unit_name/filename，自动清理非法字符
+```
+
+### 替换字典构建
+
+```python
+ctx.build_replacements(data: Dict, extra: Optional[Dict] = None) → Dict[str, str]
+# 根据 template_info.fields 自动构建 #key# → value 映射
+# 自动跳过 image/list 类型字段
+# extra: 额外键值对，键自动加 # 前缀（如果没有的话）
+```
+
+### 工具方法
+
+```python
+ctx.get_date(fmt='%Y-%m-%d') → str              # 当前日期
+ctx.gen_id(prefix='RPT', random_length=4) → str  # 生成报告 ID, 如 'RPT-20260530-ABCD'
+ctx.sanitize_filename(name) → str                # 清理非法文件名字符
+ctx.create_output_dir(base_dir, sub_dir) → str   # 创建并返回目录路径
+```
+
+### 漏洞库查询
+
+```python
+ctx.lookup_vulnerability(vuln_id) → Dict      # 按 ID 或名称查漏洞，返回完整记录
+ctx.get_vulnerability_name(vuln_id) → str     # 获取漏洞显示名称
+```
+
+### 摘要生成
+
+```python
+ctx.summarize_count(items, type_key, type_names, template_zero, template_single, template_multi) → str
+# 生成计数型摘要文本
+
+ctx.summarize_data(items, type_key, count_key, template_zero, template_with_data) → (str, int)
+# 生成数据量型摘要文本
+
+ctx.summary_templates → SummaryTemplates
+# 预定义的摘要模板配置
+```
+
+### 后处理（日志）
+
+```python
+ctx.postprocess(output_path, data, log_prefix, log_fields, db_table, db_name, db_field_map)
+# 写入 TXT 日志 + SQLite 记录
+# 参数通常从 runtime.yaml 读取
+```
+
+### Fallback 报告
+
+```python
+ctx.generate_fallback(data) → (bool, str, str)
+# 当 template.docx 缺失时，根据 schema 字段定义自动生成简单文档
+```
+
+---
+
+## 4. Schema 规范
+
+### 完整 YAML 结构
+
+```yaml
+# ── 基本信息 ──
+id: template_id           # 唯一标识 (必需，与目录名一致)
+name: 模板名称            # 显示名称 (必需)
+description: 描述         # (可选)
+version: "1.0.0"         # (推荐)
+icon: "📄"               # 图标 emoji (可选)
+author: 作者             # (可选)
+order: 1                 # 排序权重
+create_time: "2026-01-01"
+update_time: "2026-01-01"
+
+template_file: template.docx   # Word 模板文件名
+
+# ── 依赖声明 (可选) ──
+dependencies:
+  - requests>=2.28.0
+
+# ── 字段分组 ──
 field_groups:
   - id: basic
     name: 基础信息
-    order: 1
+    icon: "📋"           # 分组图标 (可选)
+    order: 1             # 显示排序
+    collapsed: false     # 默认是否折叠
 
-fields:
-  - key: title
-    label: 标题
-    type: text
-    required: true
-    group: basic
-    order: 1
-
-output:
-  filename_pattern: "{title}_{date}.docx"
-```
-
-#### 3️⃣ 实现 Handler
-
-创建 `handler.py`:
-
-```python
-from core.base_handler import BaseTemplateHandler, register_handler
-
-@register_handler("your_template")
-class YourTemplateHandler(BaseTemplateHandler):
-    
-    def __init__(self, template_manager, config):
-        super().__init__(template_manager, config)
-        self.template_id = "your_template"
-    
-    def generate(self, data, output_path):
-        # 实现报告生成逻辑
-        from docx import Document
-        
-        # ... 生成文档 ...
-        
-        return output_path
-```
-
-#### 4️⃣ (可选) 添加自定义 API
-
-如果模板需要专属后端接口，可以在 `handler.py` 中定义 `router`：
-
-```python
-from fastapi import APIRouter
-
-# 定义模板专属路由（不要手写 /api 前缀）
-router = APIRouter(tags=["your_template"])
-
-@router.get("/custom-data")
-def get_custom_data():
-    return {"data": "some data"}
-```
-
-系统会自动挂载为：`/api/plugin/{template_id}/custom-data`。
-
-#### 5️⃣ 热加载模板
-
-无需重启服务，调用热加载接口即可生效：
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/templates/reload \
-  -H "X-App-Token: <APP_API_TOKEN>"
-```
-
-如果后端是手动启动且未设置 `APP_API_TOKEN`，可省略该 Header。
-
-> **注意**：如果添加了自定义 API 路由，需要重启应用才能生效。仅修改 Handler 逻辑或 Schema 支持热加载。
-
-#### 6️⃣ 依赖声明与安全约束
-
-在 `schema.yaml` 中声明 Python 依赖：
-
-```yaml
-dependencies:
-  - "requests"
-  - "pandas"
-```
-
-**⚠️ 安全警告：**
-自 v1.2.0 起，系统启用了严格的依赖白名单机制。
-**允许的库 (Allowed Packages)**: 
-截至目前，系统白名单包括但不限于：
-  - `requests` (HTTP请求)
-  - `pandas`, `numpy` (数据处理)
-  - `openpyxl` (Excel处理)
-  - `python-docx` (Word处理)
-  - `pillow` (图片处理)
-  - `lxml`, `beautifulsoup4` (XML/HTML解析)
-  - `pyyaml` (YAML解析)
-  - `matplotlib` (图表绘制)
-  - `urllib3`, `certifi`, `idna`, `charset-normalizer`, `six`, `python-dateutil`, `pytz`, `typing-extensions` (基础依赖)
-
-*如需增加白名单，请更新 `backend/core/template_manager.py` 中的 `ALLOWED_PACKAGES` 集合，然后由您重新打包发布主程序。*
-
-**禁止的行为**:
-  - 禁止声明未授权的第三方包
-  - 禁止在模板中进行文件系统写入操作（除临时目录外）
-  - 禁止启动子进程或执行 shell 命令
-
-#### 7️⃣ 路由注册规范
-
-如果您的模板需要自定义 API，请在 `handler.py` 中定义 `APIRouter`：
-
-```python
-from fastapi import APIRouter
-
-# 系统会自动将其挂载到 /api/plugin/{template_id}/my-action
-router = APIRouter()
-
-@router.get("/my-action")
-def my_action():
-    return {"status": "ok"}
-```
-
-**注意**: 无需手动添加 `prefix`，系统会在加载时自动加上隔离前缀 `/api/plugin/{template_id}`。
-
----
-
-## Schema 规范
-
-### 完整 Schema 结构
-
-```yaml
-# ===== 基本信息 =====
-id: template_id              # 唯一标识 (必需，与目录名一致)
-name: 模板名称               # 显示名称 (必需)
-description: 模板描述        # 描述 (可选)
-version: "1.0.0"            # 版本号 (推荐)
-icon: "📄"                  # 图标 (可选)
-author: 作者                # 作者 (可选)
-create_time: "2026-01-26"   # 创建时间 (可选)
-update_time: "2026-01-26"   # 更新时间 (可选)
-
-template_file: template.docx  # 模板文件名
-
-# ===== 依赖声明 (可选) =====
-dependencies:
-  - requests>=2.28.0
-  - pandas>=1.5.0
-
-# ===== 字段分组 =====
-field_groups:
-  - id: group_id            # 分组ID
-    name: 分组名称          # 显示名称
-    icon: "📋"             # 图标 (可选)
-    order: 1               # 排序 (数字越小越靠前)
-    collapsed: false       # 默认是否折叠
-
-# ===== 数据源定义 =====
+# ── 数据源 ──
 data_sources:
-  - id: source_id           # 数据源ID (用于字段引用)
-    type: config            # 类型: config, database, api
-    description: 描述
-    config_key: key_name    # type=config 时的配置键名
+  - id: vulns
+    type: database       # database | config | api
+    description: 漏洞库
+  - id: risk_levels
+    type: config
+    config_key: risk_levels
 
-# ===== 字段定义 =====
+# ── 字段定义 ──
 fields:
-  - key: field_key          # 字段键名 (必需，唯一)
-    label: 字段标签         # 显示标签 (必需)
-    type: text              # 字段类型 (见下表)
-    required: false         # 是否必填
-    default: ""             # 默认值 ("today" 表示当前日期)
-    placeholder: ""         # 输入提示
-    group: group_id         # 所属分组
-    order: 1                # 排序
-    readonly: false         # 是否只读
-    source: source_id       # 数据源引用 (type=select时)
-    options: []             # 选项列表 (type=select时)
-    template_placeholder: "#field_key#"  # 模板中的占位符
+  - key: field_key       # 字段键名 (必需，唯一)
+    label: 字段标签      # 显示标签 (必需)
+    type: text           # 字段类型 (见下方)
+    required: false
+    default: ""          # "today" 表示当前日期
+    placeholder: ""
+    group: basic         # 所属分组 id
+    order: 1
+    readonly: false
+    source: vulns        # 数据源引用 (type=select/searchable_select 时)
+    options: []          # 静态选项列表
+    template_placeholder: "#fieldKey#"  # 模板中的占位符
 
-# ===== 行为定义 =====
+# ── 行为定义 ──
 behaviors:
   - id: behavior_id
     trigger:
-      field: trigger_field  # 触发字段
-      event: change         # 触发事件
+      field: trigger_field
+      event: change      # change | data_changed | manual
     actions:
-      - type: compute       # 动作类型: compute, api_call, set_value
+      - type: compute    # compute | api_call | set_value
         target: target_field
         rules:
           value1: result1
-          value2: result2
 
-# ===== 验证规则 =====
+# ── 验证规则 ──
 validation:
   rules:
     - fields: [field1, field2]
       rule: required
-      message: 错误提示信息
+      message: 错误提示
 
-# ===== 输出配置 =====
+# ── 输出配置 ──
 output:
-  filename_pattern: "{field}_{date}.docx"
-  output_dir: "{unit_name}"
-  log_to_file: true
-  log_pattern: "{date}_output.txt"
+  filename_pattern: "{title}_{date}.docx"
+  output_dir: "output/{unit_name}"
+  log_to_db: true
+  log_table: template_records
 
-# ===== 预览配置 =====
+# ── 预览配置 ──
 preview:
-  title: 预览标题
+  enabled: true
   fields:
     - key: field_key
       label: 显示标签
@@ -305,18 +405,24 @@ preview:
 
 ### 字段类型
 
-| 类型 | 说明 | 特殊属性 |
+| 类型 | 说明 | 特有属性 |
 |------|------|----------|
-| `text` | 单行文本输入 | `placeholder` |
-| `textarea` | 多行文本输入 | `rows` |
-| `select` | 下拉选择框 | `options`, `source` |
-| `searchable_select` | 可搜索下拉框 | `search_placeholder` |
-| `date` | 日期选择 | `default: "today"` |
-| `image` | 单张图片 | `accept`, `paste_enabled` |
-| `image_list` | 多张图片 | `max_count`, `with_description` |
+| `text` | 单行文本 | `placeholder` |
+| `textarea` | 多行文本 | `rows` |
+| `select` | 下拉选择 | `options`, `source` |
+| `searchable_select` | 可搜索下拉 | `search_placeholder`, `source`, `display_field`, `value_field` |
+| `date` | 日期选择器 | `default: "today"`, `format` |
+| `image` | 单张图片上传 | `accept`, `max_size_mb`, `paste_enabled` |
+| `image_list` | 多张图片上传 | `max_count`, `with_description`, `description_placeholder` |
+| `grouped_image_list` | 分组图片列表 | `groups`, `max_per_group` |
+| `checkbox` | 单个复选框 | `checked_value`, `unchecked_value` |
+| `checkbox_group` | 复选框组 | `options` |
+| `number` | 数字输入 | `min`, `max`, `step` |
+| `array` | 动态数组（可增删行） | `item_schema`, `min_items`, `max_items` |
+| `widget` | 自定义 HTML 组件 | `widget_file`（从 `widgets/` 目录加载） |
 | `hidden` | 隐藏字段 | - |
 
-### 选项定义格式
+### 选项格式
 
 ```yaml
 # 简单格式
@@ -332,282 +438,187 @@ options:
     label: 选项二
 ```
 
----
+### 行为类型
 
-## Handler 开发
+| 类型 | 说明 |
+|------|------|
+| `compute` | 根据规则计算目标字段值 |
+| `api_call` | 调用后端 API 获取数据填充 |
+| `set_value` | 直接设置目标字段值 |
 
-### BaseTemplateHandler 接口
+### 数据源类型
 
-```python
-class BaseTemplateHandler(ABC):
-    """模板处理器基类"""
-    
-    def __init__(self, template_manager, config: Dict):
-        self.template_manager = template_manager
-        self.config = config
-    
-    def preprocess(self, data: Dict) -> Dict:
-        """预处理数据 (可覆盖)"""
-        return data
-    
-    @abstractmethod
-    def generate(self, data: Dict, output_path: str) -> str:
-        """生成报告 (必须实现)"""
-        pass
-    
-    def validate(self, data: Dict) -> Tuple[bool, List[str]]:
-        """验证数据 (可覆盖)"""
-        pass
-    
-    def postprocess(self, result: Dict) -> Dict:
-        """后处理 (可覆盖)"""
-        return result
-    
-    def run(self, data: Dict, base_output_dir: str) -> Dict:
-        """完整执行流程"""
-        # 1. preprocess -> 2. validate -> 3. generate -> 4. postprocess
-        pass
-```
-
-### Handler 示例
-
-```python
-from core.base_handler import BaseTemplateHandler, register_handler
-from datetime import datetime
-import os
-
-@register_handler("my_template")
-class MyTemplateHandler(BaseTemplateHandler):
-    
-    def __init__(self, template_manager, config):
-        super().__init__(template_manager, config)
-        self.template_id = "my_template"
-    
-    def preprocess(self, data):
-        """预处理：添加默认值、转换格式等"""
-        processed = data.copy()
-        
-        # 自动生成编号
-        if not processed.get('report_id'):
-            processed['report_id'] = f"RPT-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        
-        # 添加配置值
-        processed['supplier_name'] = self.config.get('supplierName', '')
-        
-        return processed
-    
-    def generate(self, data, output_path):
-        """生成报告"""
-        from docx import Document
-        from core.document_editor import DocumentEditor
-        
-        # 获取模板文件
-        template_file = self.template_manager.get_template_file_path(self.template_id)
-        
-        # 加载文档
-        doc = Document(template_file)
-        editor = DocumentEditor(doc)
-        
-        # 替换占位符
-        replacements = {
-            '#report_id#': data.get('report_id', ''),
-            '#title#': data.get('title', ''),
-            # ... 更多字段
-        }
-        editor.replace_all(replacements)
-        
-        # 保存
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        doc.save(output_path)
-        
-        return output_path
-    
-    def postprocess(self, result):
-        """后处理：记录日志、发送通知等"""
-        # 写入日志
-        self._write_log(result)
-        return result
-```
-
-### 注册装饰器
-
-```python
-@register_handler("template_id")
-class MyHandler(BaseTemplateHandler):
-    pass
-```
-
-使用 `@register_handler` 装饰器会自动将 Handler 注册到 `HandlerRegistry`。
+| 类型 | 说明 | 配置键 |
+|------|------|--------|
+| `database` | 从 SQLite 数据库读取 | - |
+| `config` | 从 config.yaml 读取 | `config_key` |
+| `api` | 调用外部 API | `endpoint` |
 
 ---
 
-## API 接口
+## 5. runtime.yaml 参考
 
-### 模板相关 API
+每个模板可包含 `runtime.yaml` 来配置后处理行为：
 
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/api/templates` | GET | 获取所有模板列表 |
-| `/api/templates/{id}/schema` | GET | 获取模板 Schema |
-| `/api/templates/{id}/versions` | GET | 获取模板版本历史 |
-| `/api/templates/{id}/data-sources` | GET | 获取数据源数据 |
-| `/api/templates/{id}/validate` | POST | 验证表单数据 |
-| `/api/templates/{id}/generate` | POST | 生成报告 |
-| `/api/templates/{id}/preview` | GET | 获取预览配置 |
-| `/api/templates/{id}/check-deps` | GET | 检查模板依赖 |
-| `/api/templates/reload` | POST | 重新加载模板 |
+```yaml
+log_prefix: template_name      # TXT 日志文件前缀
+log_fields:                    # 要记录到 TXT 日志的字段列表
+  - report_date
+  - unit_name
+  - vuln_name
 
-### 响应示例
-
-**GET /api/templates**
-```json
-{
-  "templates": [
-    {
-      "id": "vuln_report",
-      "name": "漏洞报告",
-      "description": "...",
-      "icon": "🛡️",
-      "version": "1.0.0"
-    }
-  ],
-  "default_template": "vuln_report"
-}
+db_table: template_records     # SQLite 表名
+db_fields:                     # 列名 → data key 映射
+  report_date: report_date
+  unit_name: unit_name
 ```
 
-**POST /api/templates/{id}/generate**
-```json
-// Request
-{
-  "title": "测试报告",
-  "unit_name": "测试单位",
-  // ... 其他字段
-}
-
-// Response
-{
-  "success": true,
-  "report_path": "/path/to/report.docx",
-  "download_url": "/reports/测试单位/report.docx",
-  "message": "报告生成成功"
-}
-```
+- `log_prefix` 和 `log_fields` 配合：写入 `{date}_{log_prefix}_output.txt`
+- `db_table` 和 `db_fields` 配合：写入 `{date}_output.db` 的 SQLite 表
+- 所有字段均为可选 — 不提供则不记录
 
 ---
 
-## 前端集成
+## 6. Widget 系统
 
-### AppFormRenderer API
+模板可以在 `widgets/` 目录下放置自定义 JS/CSS 文件，扩展前端表单功能。
+
+### 目录结构
+
+```
+backend/templates/my_template/
+└── widgets/
+    ├── vuln_list.js    # Widget JS (工厂函数)
+    └── style.css       # Widget 样式 (可选)
+```
+
+### Widget JS 规范
+
+Widget 通过 `window.__widgetFactories` 注册：
 
 ```javascript
-// 初始化
-AppFormRenderer.init();
+// widgets/vuln_list.js
+(function() {
+    window.__widgetFactories = window.__widgetFactories || {};
 
-// 加载模板列表
-await AppFormRenderer.loadTemplateList();
+    window.__widgetFactories['my_widget'] = function(container, callbacks) {
+        // callbacks 提供:
+        //   callbacks.getData()       → 获取当前表单数据
+        //   callbacks.setData(data)   → 更新表单数据
+        //   callbacks.getFormValue(key)   → 获取指定字段值
+        //   callbacks.setFormValue(key, val) → 设置指定字段值
+        //   callbacks.uploadImage(file)     → 上传图片
+        //   callbacks.apiRequest(opts)      → 调用后端 API
+        //   callbacks.dataSources           → 模板数据源
+        //   callbacks.getConfig()           → 获取全局配置
+        //   callbacks.toast(msg, type)      → 显示提示
+        //   callbacks.openImagePreview(url) → 打开图片预览
 
-// 加载指定模板
-await AppFormRenderer.loadTemplate('template_id');
-
-// 获取当前模板ID
-const templateId = AppFormRenderer.getTemplateId();
-
-// 收集表单数据
-const data = AppFormRenderer.collectFormData();
-
-// 验证表单
-const { valid, errors } = AppFormRenderer.validateForm();
-
-// 提交生成报告
-const result = await AppFormRenderer.submitReport();
-
-// 设置字段值
-AppFormRenderer.setFieldValue('field_key', 'value');
-
-// 获取字段值
-const value = AppFormRenderer.getFieldValue('field_key');
+        container.innerHTML = `<div class="my-widget">...</div>`;
+    };
+})();
 ```
 
-### 监听模板加载事件
+### 在 schema 中声明
 
-```javascript
-window.addEventListener('template-loaded', (e) => {
-    const { templateId, schema } = e.detail;
-    console.log('Template loaded:', templateId);
-    // 执行自定义逻辑
-});
+```yaml
+fields:
+  - key: vuln_table
+    label: 漏洞列表
+    type: widget
+    group: detail
+    order: 1
+    widget_file: "vuln_list.js"
 ```
+
+### Widget 文件服务
+
+前端通过 `GET /api/templates/{template_id}/widgets/vuln_list.js` 加载 widget 代码。
 
 ---
 
-## 最佳实践
+## 7. Core SDK 门面
 
-### 1. Schema 设计
+`core/` 包是模板可导入的 SDK 门面层，从 `backend.core.*` 重新导出稳定 API。
+
+```python
+from core import (
+    gen_report_id,           # 生成报告 ID → 'RPT-20260530-ABCD'
+    set_default_dates,       # 填充日期默认值
+    set_supplier_defaults,   # 填充供应商默认值
+    GenerationContext,       # 生成上下文 (通常由 execute() 内创建)
+    SummaryGenerator,        # 摘要生成器
+    SummaryTemplates,        # 摘要模板配置
+)
+```
+
+> **设计规则**: `core/` 是纯 re-export 门面 — 不应在此添加独立实现。所有业务逻辑实现在 `backend/core/`。
+
+---
+
+## 8. 最佳实践
+
+### Schema 设计
 
 - ✅ 字段 `key` 使用 snake_case 命名
-- ✅ 为每个字段指定 `group` 和 `order`
-- ✅ 必填字段设置 `required: true`
-- ✅ 使用 `template_placeholder` 明确占位符格式
+- ✅ 为每个字段指定 `group` 和 `order` 确保正确分组排序
+- ✅ 必填字段设置 `required: true`，在 `validation` 中声明规则
+- ✅ 使用 `template_placeholder` 明确占位符格式 (如 `#fieldName#`)
+- ✅ 复用已有数据源 (`config.risk_levels`, `config.hazard_type` 等)
 
-### 2. Handler 开发
+### Handler 开发
 
-- ✅ 在 `preprocess` 中处理数据转换
-- ✅ 在 `generate` 中专注文档生成
-- ✅ 使用 `postprocess` 处理日志和通知
-- ✅ 异常处理要完善
+- ✅ 将纯业务逻辑（preprocess/validate/generate）写为独立函数
+- ✅ `execute()` 只负责流程编排：创建 ctx → preprocess → validate → generate → postprocess
+- ✅ 在 `generate()` 中通过 `ctx` 访问所有框架服务
+- ✅ 异常处理完善 — 捕获异常并返回明确的错误消息
+- ✅ **无论是否有图片，都应调用 `ctx.process_single_image()` / `ctx.process_image_list()` 来清理占位符**
 
-### 3. 模板文件
+### 模板文件
 
-- ✅ Word 模板中使用一致的占位符格式 `#field_key#`
-- ✅ 图片占位符使用独立段落
-- ✅ 保持模板结构清晰
-- ✅ **图片占位符处理**：无论是否有图片上传，都应调用 `replace_placeholder_with_images` 方法清理占位符，避免占位符残留在输出文档中
+- ✅ Word 模板中使用一致格式的占位符：`#fieldKey#`
+- ✅ 图片占位符放在独立段落中
+- ✅ 保持模板结构清晰，避免过度样式化
 
-### 4. 数据源
+---
 
-- ✅ 复用已有数据源 (`config.hazard_type` 等)
-- ✅ 数据源 ID 要有意义
+## 9. 常见问题
+
+### Q: 新模板不显示？
+
+1. 检查 `schema.yaml` YAML 语法是否正确
+2. 检查 `handler.py` 是否有 Python 语法错误
+3. 确认目录名仅含字母、数字、下划线
+4. 调用 `POST /api/templates/reload` 热加载
+
+### Q: 字段不显示？
+
+1. 检查字段的 `group` 是否在 `field_groups` 中定义
+2. 检查 `order` 是否设置正确
+
+### Q: 报告生成失败？
+
+1. 检查 `template.docx` 是否存在，或确保代码可处理 fallback 情况
+2. 检查占位符格式与 `template_placeholder` 是否一致
+3. 查看后端控制台错误日志
+
+### Q: PLUGIN descriptor 和旧 BaseTemplateHandler 的区别？
+
+`BaseTemplateHandler` 是旧的类继承模式，已不再推荐。当前所有 5 个模板使用 PLUGIN descriptor + `execute()` 函数模式：
+- 不再继承任何类
+- 通过 `GenerationContext(ctx)` 获取框架服务
+- `PLUGIN` 字典告诉 `PluginRuntime` 如何调用模板
 
 ---
 
 ## 现有模板参考
 
-### vuln_report (漏洞报告)
+| 模板 ID | 名称 | 字段数 | 复杂度 | 查看 |
+|---------|------|--------|--------|------|
+| `vuln_report` | 漏洞报告 | ~18 | 中 | `backend/templates/vuln_report/` |
+| `intrusion_report` | 入侵痕迹报告 | ~25 | 中 | `backend/templates/intrusion_report/` |
+| `penetration_test` | 渗透测试报告 | ~30+ | 高 | `backend/templates/penetration_test/` |
+| `Attack_Defense` | 攻防演练报告 | ~40+ | 高 | `backend/templates/Attack_Defense/` |
+| `single_vuln_report` | 单个漏洞报告 | ~10 | 低 | `backend/templates/single_vuln_report/` |
 
-- **位置**: `backend/templates/vuln_report/`
-- **字段数**: 18+
-- **分组**: 基础信息、目标资产、漏洞详情、证据截图
-
-### intrusion_report (入侵痕迹报告)
-
-- **位置**: `backend/templates/intrusion_report/`
-- **字段数**: 25+
-- **分组**: 基础信息、受害主机、入侵详情、时间线、证据
-
----
-
-## 常见问题
-
-### Q: 新模板不显示？
-
-1. 检查 `schema.yaml` 语法是否正确
-2. 检查 Handler 是否有语法错误
-3. 确认目录名符合命名规范（字母、数字、下划线）
-4. 尝试调用 `/api/templates/reload` 接口
-
-### Q: 字段不显示？
-
-1. 检查字段的 `group` 是否存在于 `field_groups`
-2. 检查 `order` 是否设置正确
-
-### Q: 报告生成失败？
-
-1. 检查模板文件路径是否正确
-2. 检查占位符格式是否一致
-3. 查看后端控制台错误日志
-
----
-
-## 联系支持
-
-如有问题，请提交 Issue 或联系开发团队。
+推荐从 `single_vuln_report` 开始阅读 — 代码最简洁、模式最清晰。
