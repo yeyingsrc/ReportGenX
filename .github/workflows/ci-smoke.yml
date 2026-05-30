@@ -49,7 +49,6 @@ jobs:
           unzip -qo /tmp/electron.zip -d node_modules/electron/dist
           printf 'electron' > node_modules/electron/path.txt
           printf '%s' "$VERSION" > node_modules/electron/dist/version
-          ls -la node_modules/electron/dist/ | head -20
 
       - name: Verify Electron
         run: npx electron --version

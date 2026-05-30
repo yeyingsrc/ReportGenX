@@ -7,6 +7,10 @@ async function runSmoke() {
   const appPath = path.resolve(__dirname, '..')
   const launchArgs = [appPath]
 
+  if (process.platform === 'linux') {
+    launchArgs.push('--no-sandbox')
+  }
+
   const electronApp = await electron.launch({
     args: launchArgs,
     timeout: 120000,
