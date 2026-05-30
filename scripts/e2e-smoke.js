@@ -72,7 +72,12 @@ async function runSmoke() {
 
     const exportResult = await page.evaluate(async () => {
       try {
-        const templates = await window.AppAPI.Templates.list();
+        let templates = null
+        for (let i = 0; i < 10; i++) {
+          templates = await window.AppAPI.Templates.list()
+          if (templates && templates.length > 0) break
+          await new Promise(r => setTimeout(r, 1000))
+        }
         const first = templates && templates[0] && templates[0].id;
         if (!first) {
           return { ok: false, message: 'No templates available for export test' };
