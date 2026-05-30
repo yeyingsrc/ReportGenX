@@ -39,24 +39,25 @@ jobs:
         run: npm install --no-fund --no-audit --ignore-scripts
 
       - name: Download Electron binary
-        run: node -e "
-          const {downloadArtifact} = require('@electron/get');
-          const extract = require('extract-zip');
-          const path = require('path');
-          const fs = require('fs');
-          const electronDir = path.dirname(require.resolve('electron/package.json'));
-          const distPath = path.join(electronDir, 'dist');
+        run: |
+          node -e '
+          const {downloadArtifact} = require("@electron/get");
+          const extract = require("extract-zip");
+          const path = require("path");
+          const fs = require("fs");
+          const electronDir = path.dirname(require.resolve("electron/package.json"));
+          const distPath = path.join(electronDir, "dist");
           (async () => {
             const zipPath = await downloadArtifact({
-              version: require('electron/package.json').version,
-              artifactName: 'electron', force: true
+              version: require("electron/package.json").version,
+              artifactName: "electron", force: true
             });
             if (!fs.existsSync(distPath)) fs.mkdirSync(distPath, {recursive: true});
             await extract(zipPath, {dir: distPath});
-            await fs.promises.writeFile(path.join(electronDir, 'path.txt'), 'electron');
-            console.log('Electron binary installed');
+            await fs.promises.writeFile(path.join(electronDir, "path.txt"), "electron");
+            console.log("Electron binary installed");
           })().catch(e => { console.error(e); process.exit(1); });
-        "
+          '
 
       - name: Verify Electron
         run: npx electron --version
