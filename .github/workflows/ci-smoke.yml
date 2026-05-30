@@ -40,24 +40,14 @@ jobs:
 
       - name: Download Electron binary
         run: |
-          node -e '
-          const {downloadArtifact} = require("@electron/get");
-          const extract = require("extract-zip");
-          const path = require("path");
-          const fs = require("fs");
-          const electronDir = path.dirname(require.resolve("electron/package.json"));
-          const distPath = path.join(electronDir, "dist");
-          (async () => {
-            const zipPath = await downloadArtifact({
-              version: require("electron/package.json").version,
-              artifactName: "electron", force: true
-            });
-            if (!fs.existsSync(distPath)) fs.mkdirSync(distPath, {recursive: true});
-            await extract(zipPath, {dir: distPath});
-            await fs.promises.writeFile(path.join(electronDir, "path.txt"), "electron");
-            console.log("Electron binary installed");
-          })().catch(e => { console.error(e); process.exit(1); });
-          '
+          VERSION=$(node -p "require('./package.json').devDependencies.electron.replace('^','')")
+          URL="https://github.com/electron/electron/releases/download/v${VERSION}/electron-v${VERSION}-linux-x64.zip"
+          echo "Downloading Electron $VERSION from $URL"
+          curl -fsSL -o /tmp/electron.zip "$URL"
+          rm -rf node_modules/electron/dist
+          unzip -qo /tmp/electron.zip -d node_modules/electron/dist
+          echo 'electron' > node_modules/electron/path.txt
+          echo "$VERSION" > node_modules/electron/dist/version
 
       - name: Verify Electron
         run: npx electron --version
