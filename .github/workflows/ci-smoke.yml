@@ -51,7 +51,7 @@ jobs:
           printf '%s' "$VERSION" > node_modules/electron/dist/version
 
       - name: Verify Electron
-        run: npx electron --version
+        run: npx electron --no-sandbox --version
 
       - name: Check version sync
         run: npm run check-version
