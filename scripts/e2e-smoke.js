@@ -24,8 +24,7 @@ async function runSmoke() {
     page = await electronApp.firstWindow()
     await page.waitForSelector('#btn-open-toolbox', { timeout: 120000 })
     await page.waitForFunction(() => {
-      const el = document.getElementById('api-status-text')
-      return el && el.innerText === 'Connected'
+      return document.getElementById('template-selector').options.length > 0
     }, { timeout: 30000 })
     await page.click('#btn-open-toolbox')
 
