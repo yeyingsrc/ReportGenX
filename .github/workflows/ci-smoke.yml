@@ -45,9 +45,11 @@ jobs:
           echo "Downloading Electron $VERSION from $URL"
           curl -fsSL -o /tmp/electron.zip "$URL"
           rm -rf node_modules/electron/dist
+          mkdir -p node_modules/electron/dist
           unzip -qo /tmp/electron.zip -d node_modules/electron/dist
-          echo 'electron' > node_modules/electron/path.txt
-          echo "$VERSION" > node_modules/electron/dist/version
+          printf 'electron' > node_modules/electron/path.txt
+          printf '%s' "$VERSION" > node_modules/electron/dist/version
+          ls -la node_modules/electron/dist/ | head -20
 
       - name: Verify Electron
         run: npx electron --version
