@@ -528,7 +528,20 @@ class PluginRuntime:
         if handler is None:
             module = cls._resolve_handler_module(template_id)
             if module is not None:
-                logger.debug("No registry handler for %s; module found but LEGACY_HANDLER fallback removed.", template_id)
+                if getattr(module, "PLUGIN", None) is not None:
+                    logger.debug(
+                        "No registry handler for %s; falling back to PLUGIN descriptor.",
+                        template_id,
+                    )
+                    return cls._execute_descriptor(
+                        template_id, data, output_dir, template_manager, config
+                    ) or cls._error_result(
+                        f"Descriptor execution failed for template: {template_id}"
+                    )
+                logger.debug(
+                    "No registry handler for %s; module found but no PLUGIN descriptor.",
+                    template_id,
+                )
 
         if handler is None:
             return cls._error_result(f"No handler registered for template: {template_id}")
